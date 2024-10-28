@@ -5,6 +5,7 @@ mod service;
 mod encrypted_cred;
 mod config;
 mod error;
+mod instance;
 
 #[tokio::main]
 async fn main() {

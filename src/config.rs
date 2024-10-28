@@ -5,14 +5,8 @@ use std::path::Path;
 use log::{info, warn};
 use serde_yaml::Value;
 use tracing::instrument;
-use crate::encrypted_cred::EncryptedCredential;
 use crate::error::GSError;
-
-#[derive(Debug, Clone)]
-pub struct GrafanaInstance {
-    url: String,
-    api_token: EncryptedCredential, // encryption to not store the key in plain memory. a lil bit safer
-}
+use crate::instance::GrafanaInstance;
 
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
@@ -94,15 +88,12 @@ impl Config {
                 .to_string()
                 .into();
 
-            slaves.push(GrafanaInstance {
-                url,
-                api_token,
-            })
+            slaves.push(GrafanaInstance::new(url, api_token));
         }
 
         info!("Loaded {} slaves:", instance_slaves.len());
         for slave in &slaves {
-            info!("  - {}", slave.url);
+            info!("  - {}", slave.url());
         }
 
         Ok(slaves)
@@ -147,11 +138,10 @@ impl Config {
 
         let config = serde_yaml::from_reader::<_, Value>(file)?;
 
-        let instance_master = GrafanaInstance {
-            url: Self::read_string_from_config(&config, "service.instanceMaster.url")?,
-            api_token: Self::read_string_from_config(&config, "service.instanceMaster.api_token")?.into(),
-        };
+        let url = Self::read_string_from_config(&config, "service.instanceMaster.url")?;
+        let api_token = Self::read_string_from_config(&config, "service.instanceMaster.api_token")?.into();
 
+        let instance_master = GrafanaInstance::new(url, api_token);
         let instance_slaves = Self::collect_slaves(&config)?;
         let dashboards = Self::collect_dashboards(&config)?;
 
@@ -168,14 +158,14 @@ impl Config {
         println!("Full configuration:");
         println!("  - Service configuration:");
         println!("    - Instance master:");
-        println!("      - URL: {}", self.service.instance_master.url);
-        println!("      - Token: {}", self.service.instance_master.api_token.value());
+        println!("      - URL: {}", self.service.instance_master.url());
+        println!("      - Token: {}", self.service.instance_master.api_token().value());
         println!("    - Service slaves:");
 
         for (i, slave) in self.service.instance_slaves.iter().enumerate() {
             println!("      + Slave #{i}:");
-            println!("        - URL: {}", slave.url);
-            println!("        - Token: {}", slave.api_token.value());
+            println!("        - URL: {}", slave.url());
+            println!("        - Token: {}", slave.api_token().value());
         }
 
         println!("    - Synced Dashboards:");
