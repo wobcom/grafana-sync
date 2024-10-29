@@ -135,6 +135,7 @@ impl GrafanaInstance {
         Ok(serde_json::from_str::<Vec<SimpleDashboard>>(&text)?)
     }
 
+    #[allow(dead_code)]
     pub async fn get_dashboards_in_folder(&mut self, folder_uid: &str) -> Result<Vec<SimpleDashboard>, GSError> {
         let endpoint = format!("{}{}", &self.base_url(), "/api/search");
         let client = self.client()?;
@@ -166,6 +167,7 @@ impl GrafanaInstance {
         Ok(serde_json::from_str(&text)?)
     }
 
+    #[allow(dead_code)]
     pub async fn delete_dashboard(&mut self, uid: &str) -> Result<(), GSError> {
         let endpoint = format!("{}{}", &self.base_url(), format!("/api/dashboards/uid/{}", uid));
         let client = self.client()?;

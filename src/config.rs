@@ -2,10 +2,9 @@ use std::{fs, io};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use serde_yaml::Value;
 use tracing::instrument;
-use crate::api::dashboards::{Folder, SimpleDashboard};
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 
@@ -190,30 +189,5 @@ impl Config {
             debug!("      + Dashboard #{i}:");
             debug!("        - Path: {}", board);
         }
-    }
-}
-
-impl ServiceConfig {
-    pub async fn replicate_to_slaves(&mut self, dashboard: &SimpleDashboard) -> Result<(), GSError> {
-        let mut slave_folders: Vec<(&mut GrafanaInstance, Folder)> = Vec::new();
-        for slave in &mut self.instance_slaves {
-            match slave.ensure_folder(&dashboard.folder_title).await {
-                Ok(folder) => {
-                    slave_folders.push((slave, folder));
-                }
-                Err(e) => {
-                    error!("Couldn't sync folder for instance {}. Error: {e}", slave.base_url());
-                }
-            }
-        }
-
-        let mut full_dashboard = self.instance_master.get_dashboard_full(&dashboard.uid).await?;
-        full_dashboard.sanitize();
-        for (slave, folder) in slave_folders {
-            info!("Starting replication of \"{}\" onto {}", dashboard.title, slave.base_url());
-            slave.import_dashboard(&full_dashboard, &folder, true).await?;
-        }
-
-        Ok(())
     }
 }
