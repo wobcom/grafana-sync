@@ -2,22 +2,23 @@ use std::{fs, io};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use log::{info, warn};
+use log::{debug, error, info, warn};
 use serde_yaml::Value;
 use tracing::instrument;
+use crate::api::dashboards::{Folder, SimpleDashboard};
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
-    instance_master: GrafanaInstance,
-    instance_slaves: Vec<GrafanaInstance>,
-    dashboard: Vec<String>,
+    pub instance_master: GrafanaInstance,
+    pub instance_slaves: Vec<GrafanaInstance>,
+    pub dashboard: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    service: ServiceConfig,
+    pub service: ServiceConfig,
 }
 
 impl Config {
@@ -33,13 +34,13 @@ impl Config {
         File::open(&path)
     }
 
-    fn get_yaml_path<'a>(config: &'a Value, key: &str) -> Result<&'a Value, GSError> {
-        let keys = key.split('.');
+    fn get_yaml_path<'a>(config: &'a Value, full_key: &str) -> Result<&'a Value, GSError> {
+        let keys = full_key.split('.');
         let mut value = config;
 
         for key in keys {
            value = value.get(key)
-                .ok_or_else(|| GSError::ConfigKeyMissing(key.to_string()))?;
+                .ok_or_else(|| GSError::ConfigKeyMissing(full_key.to_string()))?;
         }
 
         Ok(value)
@@ -93,7 +94,7 @@ impl Config {
 
         info!("Loaded {} slaves:", instance_slaves.len());
         for slave in &slaves {
-            info!("  - {}", slave.url());
+            info!("  - {}", slave.base_url());
         }
 
         Ok(slaves)
@@ -140,38 +141,87 @@ impl Config {
 
         let url = Self::read_string_from_config(&config, "service.instanceMaster.url")?;
         let api_token = Self::read_string_from_config(&config, "service.instanceMaster.api_token")?.into();
+        let sync_tag = Self::read_string_from_config(&config, "service.instanceMaster.sync_tag")?;
 
-        let instance_master = GrafanaInstance::new(url, api_token);
+        let mut instance_master = GrafanaInstance::new(url, api_token);
+        instance_master.make_master(sync_tag);
         let instance_slaves = Self::collect_slaves(&config)?;
         let dashboards = Self::collect_dashboards(&config)?;
 
         Ok(Config {
             service: ServiceConfig {
                 instance_master,
-                instance_slaves: instance_slaves,
+                instance_slaves,
                 dashboard: dashboards,
             },
         })
     }
 
     pub(crate) fn dbg_print(&self) {
-        println!("Full configuration:");
-        println!("  - Service configuration:");
-        println!("    - Instance master:");
-        println!("      - URL: {}", self.service.instance_master.url());
-        println!("      - Token: {}", self.service.instance_master.api_token().value());
-        println!("    - Service slaves:");
+        debug!("Full configuration:");
+        debug!("  - Service configuration:");
+        debug!("    - Instance master:");
+        debug!("      - URL: {}", self.service.instance_master.base_url());
+        debug!("      - Token: {}", self.service.instance_master.api_token().value());
+        debug!("    - Service slaves:");
 
         for (i, slave) in self.service.instance_slaves.iter().enumerate() {
-            println!("      + Slave #{i}:");
-            println!("        - URL: {}", slave.url());
-            println!("        - Token: {}", slave.api_token().value());
+            debug!("      + Slave #{i}:");
+            debug!("        - URL: {}", slave.base_url());
+            debug!("        - Token: {}", slave.api_token().value());
         }
 
-        println!("    - Synced Dashboards:");
+        debug!("    - Synced Dashboards:");
         for (i, board) in self.service.dashboard.iter().enumerate() {
-            println!("      + Dashboard #{i}:");
-            println!("        - Path: {}", board);
+            debug!("      + Dashboard #{i}:");
+            debug!("        - Path: {}", board);
         }
+    }
+}
+
+impl ServiceConfig {
+    pub async fn replicate_to_slaves(&mut self, dashboard: &SimpleDashboard) -> Result<(), GSError> {
+        info!("Starting replication of dashboard: {}", dashboard.title);
+        let mut slave_folders: Vec<(&mut GrafanaInstance, Folder)> = Vec::new();
+        for slave in &mut self.instance_slaves {
+            match slave.ensure_folder(&dashboard.folder_title).await {
+                Ok(folder) => {
+                    slave_folders.push((slave, folder));
+                }
+                Err(e) => {
+                    error!("Couldn't sync folder for instance {}. Error: {e}", slave.base_url());
+                }
+            }
+        }
+
+        let mut full_dashboard = self.instance_master.get_dashboard_full(&dashboard.uid).await?;
+        full_dashboard.sanitize();
+        let full_dashboard_title = full_dashboard.dashboard.get("title")
+            .ok_or_else(|| GSError::ConfigKeyMissing("dashboard.title".to_string()))?
+            .as_str()
+            .ok_or_else(|| GSError::ConfigKeyTypeWrong("dashboard.title".to_string(), "String"))?
+            .to_string();
+
+        for (slave, folder) in slave_folders {
+            info!("Starting replication to {}", slave.base_url());
+            let slave_dashboards = slave.get_dashboards_in_folder(&folder.uid).await?;
+            let slave_dashboard = slave_dashboards
+                .into_iter()
+                .filter(|dash| dash.title == full_dashboard_title)
+                .next();
+
+
+            //if let Some(slave_dashboard) = slave_dashboard {
+            //    full_dashboard.meta.url = slave_dashboard.url;
+            //    if let Some(uid) = full_dashboard.dashboard.get_mut("uid") {
+            //        *uid = serde_json::Value::String(slave_dashboard.uid.to_string());
+            //    }
+            //    slave.delete_dashboard(&slave_dashboard.uid).await?;
+            //}
+
+            slave.import_dashboard(&full_dashboard, &folder, true).await?;
+        }
+
+        Ok(())
     }
 }
