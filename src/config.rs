@@ -70,7 +70,7 @@ impl Config {
     fn collect_slaves(config: &Value) -> Result<Vec<GrafanaInstance>, GSError> {
         let mut slaves = Vec::new();
 
-        let instance_slaves = Self::get_yaml_path(config, "service.instanceSlaves");
+        let instance_slaves = Self::get_yaml_path(config, "service.instance_slaves");
 
         let instance_slaves = match instance_slaves {
             Err(_) => {
@@ -81,17 +81,17 @@ impl Config {
         };
 
         let instance_slaves = instance_slaves.as_sequence()
-            .ok_or(GSError::ConfigKeyTypeWrong("service.instanceSlaves".to_string(), "Sequence"))?;
+            .ok_or(GSError::ConfigKeyTypeWrong("service.instance_slaves".to_string(), "Sequence"))?;
 
         for (i, instance_slave) in instance_slaves.iter().enumerate() {
-            let key = format!("service.instanceSlaves[{}].url", i);
+            let key = format!("service.instance_slaves[{}].url", i);
             let url = instance_slave.get("url")
                 .ok_or_else(|| GSError::ConfigKeyMissing(key.clone()))?
                 .as_str()
                 .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.clone(), "String"))?
                 .to_string();
 
-            let key = format!("service.instanceSlaves[{}].api_token", i);
+            let key = format!("service.instance_slaves[{}].api_token", i);
             let api_token= instance_slave.get("api_token")
                 .ok_or_else(|| GSError::ConfigKeyMissing(key.clone()))?
                 .as_str()
@@ -149,9 +149,9 @@ impl Config {
 
         let config = serde_yaml::from_reader::<_, Value>(file)?;
 
-        let url = Self::read_string_from_config(&config, "service.instanceMaster.url")?;
-        let api_token = Self::read_string_from_config(&config, "service.instanceMaster.api_token")?.into();
-        let sync_tag = Self::read_string_from_config(&config, "service.instanceMaster.sync_tag")?;
+        let url = Self::read_string_from_config(&config, "service.instance_master.url")?;
+        let api_token = Self::read_string_from_config(&config, "service.instance_master.api_token")?.into();
+        let sync_tag = Self::read_string_from_config(&config, "service.instance_master.sync_tag")?;
         let sync_rate_mins = Self::read_u64_from_config(&config, "service.sync_rate_mins")?;
 
         let mut instance_master = GrafanaInstance::new(url, api_token);

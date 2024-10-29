@@ -1,9 +1,9 @@
 service:
-  instanceMaster:
+  instance_master:
     url: "https://dashboard.service.wobcom.de"
     api_token: "meow1234"
 
-  instanceSlaves:
+  instance_slaves:
     - url: "https://localhost:4431"
       api_token: "meow1234"
     - url: "https://localhost:4432"
