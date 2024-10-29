@@ -145,6 +145,8 @@ impl Config {
 
         let mut instance_master = GrafanaInstance::new(url, api_token);
         instance_master.make_master(sync_tag);
+        info!("Loaded master \"{}\"", instance_master.base_url());
+
         let instance_slaves = Self::collect_slaves(&config)?;
         let dashboards = Self::collect_dashboards(&config)?;
 
@@ -181,7 +183,6 @@ impl Config {
 
 impl ServiceConfig {
     pub async fn replicate_to_slaves(&mut self, dashboard: &SimpleDashboard) -> Result<(), GSError> {
-        info!("Starting replication of dashboard: {}", dashboard.title);
         let mut slave_folders: Vec<(&mut GrafanaInstance, Folder)> = Vec::new();
         for slave in &mut self.instance_slaves {
             match slave.ensure_folder(&dashboard.folder_title).await {
@@ -196,29 +197,8 @@ impl ServiceConfig {
 
         let mut full_dashboard = self.instance_master.get_dashboard_full(&dashboard.uid).await?;
         full_dashboard.sanitize();
-        let full_dashboard_title = full_dashboard.dashboard.get("title")
-            .ok_or_else(|| GSError::ConfigKeyMissing("dashboard.title".to_string()))?
-            .as_str()
-            .ok_or_else(|| GSError::ConfigKeyTypeWrong("dashboard.title".to_string(), "String"))?
-            .to_string();
-
         for (slave, folder) in slave_folders {
-            info!("Starting replication to {}", slave.base_url());
-            let slave_dashboards = slave.get_dashboards_in_folder(&folder.uid).await?;
-            let slave_dashboard = slave_dashboards
-                .into_iter()
-                .filter(|dash| dash.title == full_dashboard_title)
-                .next();
-
-
-            //if let Some(slave_dashboard) = slave_dashboard {
-            //    full_dashboard.meta.url = slave_dashboard.url;
-            //    if let Some(uid) = full_dashboard.dashboard.get_mut("uid") {
-            //        *uid = serde_json::Value::String(slave_dashboard.uid.to_string());
-            //    }
-            //    slave.delete_dashboard(&slave_dashboard.uid).await?;
-            //}
-
+            info!("Starting replication of \"{}\" onto {}", dashboard.title, slave.base_url());
             slave.import_dashboard(&full_dashboard, &folder, true).await?;
         }
 

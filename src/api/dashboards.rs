@@ -1,4 +1,4 @@
-use log::{debug, error, info};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::instrument;
@@ -183,7 +183,7 @@ impl GrafanaInstance {
 
     #[instrument]
     pub async fn import_dashboard(&mut self, dashboard: &FullDashboard, folder: &Folder, overwrite: bool) -> Result<(), GSError> {
-        let base_url = self.base_url();
+        let base_url = self.base_url().to_string();
         let endpoint = format!("{}{}", base_url, "/api/dashboards/import");
 
         info!("Syncing dashboard \"{}\" to {}", dashboard.meta.url, base_url);
@@ -203,12 +203,21 @@ impl GrafanaInstance {
             .json(&body)
             .send()
             .await?;
-        let status = response.error_for_status_ref().map(|_| ());
-        let text = response.text().await?;
+        let status = response.status();
 
+        if status.as_u16() == 412 {
+            warn!("Dashboard already exists, but overwriting was turned off. Skipping...");
+            return Ok(());
+        }
+
+        let response = response.error_for_status()?;
+
+        info!("Replication of dashboard {} to {} successful", dashboard.meta.url, base_url);
+
+        let text = response.text().await?;
         debug!("Import response: {}", text);
 
-        Ok(status?)
+        Ok(())
     }
 }
 

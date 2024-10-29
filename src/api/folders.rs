@@ -1,4 +1,4 @@
-use log::debug;
+use log::{debug, info};
 use serde::Serialize;
 use uuid::Uuid;
 use crate::api::dashboards::Folder;
@@ -60,7 +60,7 @@ impl GrafanaInstance {
         let text = response.text().await?;
 
         let folder = serde_json::from_str::<Folder>(&text)?;
-        debug!("Folder {} has been created", folder.title);
+        info!("Folder {} has been created", folder.title);
 
         Ok(folder)
     }
