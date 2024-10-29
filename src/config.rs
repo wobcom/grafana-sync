@@ -14,6 +14,7 @@ pub struct ServiceConfig {
     pub instance_master: GrafanaInstance,
     pub instance_slaves: Vec<GrafanaInstance>,
     pub dashboard: Vec<String>,
+    pub sync_rate_mins: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +55,15 @@ impl Config {
             .as_str()
             .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.to_string(), "String"))?
             .to_string())
+    }
+
+    #[instrument]
+    fn read_u64_from_config(config: &Value, key: &str) -> Result<u64, GSError> {
+        let value = Self::get_yaml_path(config, key)?;
+
+        Ok(value
+            .as_u64()
+            .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.to_string(), "u64"))?)
     }
 
     #[instrument]
@@ -142,6 +152,7 @@ impl Config {
         let url = Self::read_string_from_config(&config, "service.instanceMaster.url")?;
         let api_token = Self::read_string_from_config(&config, "service.instanceMaster.api_token")?.into();
         let sync_tag = Self::read_string_from_config(&config, "service.instanceMaster.sync_tag")?;
+        let sync_rate_mins = Self::read_u64_from_config(&config, "service.sync_rate_mins")?;
 
         let mut instance_master = GrafanaInstance::new(url, api_token);
         instance_master.make_master(sync_tag);
@@ -155,6 +166,7 @@ impl Config {
                 instance_master,
                 instance_slaves,
                 dashboard: dashboards,
+                sync_rate_mins,
             },
         })
     }

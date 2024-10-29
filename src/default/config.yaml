@@ -15,3 +15,5 @@ service:
     - "Folder/Dashboard"
     - "Folder2/Dashboard"
     - "Folder3/Meowboard"
+
+  sync_rate_mins: 10
