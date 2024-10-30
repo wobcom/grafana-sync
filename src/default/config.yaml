@@ -2,6 +2,7 @@ service:
   instance_master:
     url: "https://dashboard.service.wobcom.de"
     api_token: "meow1234"
+    sync_tag: "MagicSync"
 
   instance_slaves:
     - url: "https://localhost:4431"
