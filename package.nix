@@ -24,7 +24,7 @@ rustPlatform.buildRustPackage rec {
   pname = "graphsync";
   version = "0.1.0";
 
-  src = ../../../../programming/graphsync;
+  src = .;
 
   nativeBuildInputs = [ perl pkg-config ];
   buildInputs = [ perl openssl ];
