@@ -23,8 +23,7 @@ rustPlatform.buildRustPackage rec {
 
   src = ./.;
 
-  nativeBuildInputs = [ openssh perl pkg-config ];
-  buildInputs = [ perl openssl ];
+  buildInputs = [ perl pkg-config openssl ];
 
   cargoHash = "sha256-l0Tt8yEevALC8Hpj/A+Xu0tkDXPsuX8l5qOBIRB/Tf0=";
 
