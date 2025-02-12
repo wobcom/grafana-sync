@@ -17,4 +17,6 @@ pub enum GSError {
     InvalidHeader(#[from] InvalidHeaderValue),
     #[error(transparent)]
     JSONError(#[from] serde_json::error::Error),
+    #[error(transparent)]
+    JoinError(#[from] tokio::task::JoinError),
 }

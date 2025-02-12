@@ -1,10 +1,9 @@
 use crate::api::dashboards::{Folder, SimpleDashboard};
 use crate::config::Config;
 use crate::error::GSError;
-use crate::instance::GrafanaInstance;
 use chrono::Local;
-use futures::future;
 use log::{debug, error, info};
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::instrument;
@@ -13,6 +12,9 @@ use tracing::instrument;
 pub struct SyncService {
     config: Config,
 }
+
+// HashMap<Slave Base URL, HashMap<Folder Name, Folder>>
+pub type FolderMap = HashMap<String, HashMap<String, Folder>>;
 
 impl SyncService {
     #[instrument]
@@ -28,49 +30,80 @@ impl SyncService {
         sleep(Duration::from_mins(self.config.service.sync_rate_mins)).await;
     }
 
-    pub async fn replicate_to_slaves(
-        &mut self,
-        dashboard: &SimpleDashboard,
-    ) -> Result<(), GSError> {
-        info!(
-            "Starting replication of dashboard \"{}/{}\"",
-            dashboard.folder_title, dashboard.title
-        );
-        let mut slave_folders: Vec<(&mut GrafanaInstance, Folder)> = Vec::new();
-        for slave in &mut self.config.service.instance_slaves {
-            match slave.ensure_folder(&dashboard.folder_title).await {
-                Ok(folder) => {
-                    slave_folders.push((slave, folder));
-                }
-                Err(e) => {
-                    error!(
-                        "Couldn't sync folder for instance {}. Error: {e}",
-                        slave.base_url()
-                    );
+    pub async fn replicate_folders_to_slaves(&self, dashboards: &[SimpleDashboard]) -> FolderMap {
+        let unique_folders = dashboards
+            .iter()
+            .map(|d| &d.folder_title)
+            .collect::<HashSet<_>>();
+
+        let mut created_folders: HashMap<String, HashMap<String, Folder>> = HashMap::new();
+
+        for slave in &self.config.service.instance_slaves {
+            for folder in unique_folders.iter() {
+                match slave.ensure_folder(folder).await {
+                    Ok(folder) => {
+                        created_folders
+                            .entry(slave.base_url().to_string())
+                            .or_default()
+                            .insert(folder.title.clone(), folder);
+                    }
+                    Err(e) => {
+                        error!(
+                            "Couldn't sync folder for instance {}. Error: {e}",
+                            slave.base_url()
+                        );
+                    }
                 }
             }
         }
 
-        let mut full_dashboard = self
-            .config
-            .service
-            .instance_master
-            .get_dashboard_full(&dashboard.uid)
-            .await?;
-        for (slave, folder) in slave_folders {
-            // Override or create new dashboard
-            let old_dashboard = slave
-                .get_first_dashboard_in_folder_by_name(&folder.uid, &dashboard.title)
-                .await?;
-            match &old_dashboard {
-                Some(d) => info!("Performing overwriting dashboard sync. Target: {}", d.uid),
-                None => info!("Performing new dashboard sync"),
-            }
-            full_dashboard.sanitize(old_dashboard.as_ref().map(|d| d.uid.as_str()));
+        created_folders
+    }
 
-            slave
-                .import_dashboard(&full_dashboard, &folder, true)
+    pub async fn replicate_dashboards_to_slaves(
+        &self,
+        dashboards: &[SimpleDashboard],
+        folder_map: &FolderMap,
+    ) -> Result<(), GSError> {
+        for dashboard in dashboards.iter() {
+            info!(
+                "Starting replication of dashboard \"{}/{}\"",
+                dashboard.folder_title, dashboard.title
+            );
+
+            let mut full_dashboard = self
+                .config
+                .service
+                .instance_master
+                .get_dashboard_full(&dashboard.uid)
                 .await?;
+            for slave in &self.config.service.instance_slaves {
+                let Some(slave_folder_map) = folder_map.get(slave.base_url()) else {
+                    error!("Slave {} is out of sync (Unauthorized?)", slave.base_url());
+                    continue;
+                };
+
+                let Some(folder) = slave_folder_map.get(&dashboard.folder_title) else {
+                    error!("Slave {} is out of sync. (Unauthorized?)", slave.base_url());
+                    continue;
+                };
+
+                // Override or create new dashboard
+                let old_dashboard = slave
+                    .get_first_dashboard_in_folder_by_name(&folder.uid, &dashboard.title)
+                    .await?;
+                match &old_dashboard {
+                    Some(d) => {
+                        info!("Performing overwriting dashboard sync. Target: {}", d.uid)
+                    }
+                    None => info!("Performing new dashboard sync"),
+                }
+                full_dashboard.sanitize(old_dashboard.as_ref().map(|d| d.uid.as_str()));
+
+                slave
+                    .import_dashboard(&full_dashboard, &folder, true)
+                    .await?;
+            }
         }
 
         Ok(())
@@ -107,21 +140,8 @@ impl SyncService {
 
             debug!("Master Dashboards with synctag: {:?}", &dashboards);
 
-            let tasks: Vec<_> = dashboards
-                .into_iter()
-                .map(|dashboard| {
-                    let mut service = self.clone();
-                    tokio::spawn(async move { service.replicate_to_slaves(&dashboard).await })
-                })
-                .collect();
-
-            for a in future::join_all(tasks).await {
-                match a {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => error!("Couldn't sync dashboard. Error: {e}"),
-                    Err(e) => error!("Couldn't sync dashboard. Error: {e}"),
-                }
-            }
+            let folder_map = self.replicate_folders_to_slaves(&dashboards).await;
+            self.replicate_dashboards_to_slaves(&dashboards, &folder_map).await?;
 
             self.wait_for_next_sync().await;
         }
