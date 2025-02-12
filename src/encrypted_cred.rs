@@ -1,8 +1,8 @@
-use std::fmt::{Debug, Formatter};
-use aes_gcm::aead::{Aead, Nonce, OsRng};
-use aes_gcm::{AeadCore, Aes256Gcm, AesGcm, KeyInit};
 use aes_gcm::aead::consts::U12;
+use aes_gcm::aead::{Aead, Nonce, OsRng};
 use aes_gcm::aes::Aes256;
+use aes_gcm::{AeadCore, Aes256Gcm, AesGcm, KeyInit};
+use std::fmt::{Debug, Formatter};
 use tracing::instrument;
 
 #[derive(Clone)]
@@ -19,22 +19,24 @@ impl EncryptedCredential {
         let key = Aes256Gcm::generate_key(OsRng);
         let cipher = Aes256Gcm::new(&key);
         let nonce = Aes256Gcm::generate_nonce(OsRng);
-        let ciphertext = cipher.encrypt(&nonce, credential.as_bytes())
+        let ciphertext = cipher
+            .encrypt(&nonce, credential.as_bytes())
             .expect("encryption failure!");
 
         EncryptedCredential {
             cred: ciphertext,
             cipher,
-            nonce
+            nonce,
         }
     }
 
     #[instrument]
     pub fn value(&self) -> String {
-        let plaintext = self.cipher.decrypt(&self.nonce, self.cred.as_slice())
+        let plaintext = self
+            .cipher
+            .decrypt(&self.nonce, self.cred.as_slice())
             .expect("decryption failure!");
-        let string = String::from_utf8(plaintext)
-            .expect("decryption failure!");
+        let string = String::from_utf8(plaintext).expect("decryption failure!");
 
         string
     }

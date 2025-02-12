@@ -1,9 +1,9 @@
-use log::{debug, info};
-use serde::Serialize;
-use uuid::Uuid;
 use crate::api::dashboards::Folder;
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
+use log::{debug, info};
+use serde::Serialize;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
 struct FolderBody {
@@ -31,10 +31,12 @@ impl GrafanaInstance {
     // returns the folder uid on the instance
     pub async fn ensure_folder(&self, title: &str) -> Result<Folder, GSError> {
         debug!("Ensuring folder {} exists on {}...", title, self.base_url());
-        let matching_folder = self.get_all_folders()
+        let matching_folder = self
+            .get_all_folders()
             .await?
             .into_iter()
-            .filter(|f| f.title == title).next();
+            .filter(|f| f.title == title)
+            .next();
         if let Some(folder) = matching_folder {
             debug!("Folder {} already exists", title);
             return Ok(folder);

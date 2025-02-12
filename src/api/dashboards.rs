@@ -1,9 +1,9 @@
-use std::collections::VecDeque;
-use log::{debug, info, warn};
-use serde::{Deserialize, Serialize};
-use tracing::instrument;
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
+use log::{debug, info, warn};
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use tracing::instrument;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Tag {
@@ -111,10 +111,7 @@ impl GrafanaInstance {
         let endpoint = format!("{}{}", &self.base_url(), "/api/dashboards/tags");
         let client = self.client();
 
-        let response = client.get(endpoint)
-            .send()
-            .await?
-            .error_for_status()?;
+        let response = client.get(endpoint).send().await?.error_for_status()?;
         let text = response.text().await?;
 
         Ok(serde_json::from_str::<Vec<Tag>>(&text)?)
@@ -136,13 +133,20 @@ impl GrafanaInstance {
     }
 
     #[allow(dead_code)]
-    pub async fn get_dashboards_in_folder(&self, folder_uid: &str) -> Result<Vec<SimpleDashboard>, GSError> {
+    pub async fn get_dashboards_in_folder(
+        &self,
+        folder_uid: &str,
+    ) -> Result<Vec<SimpleDashboard>, GSError> {
         let endpoint = format!("{}{}", &self.base_url(), "/api/search");
         let client = self.client();
 
         let response = client
             .get(endpoint)
-            .query(&[("folderUIDs", folder_uid), ("permission", "View"), ("sort", "alpha-asc")])
+            .query(&[
+                ("folderUIDs", folder_uid),
+                ("permission", "View"),
+                ("sort", "alpha-asc"),
+            ])
             .send()
             .await?
             .error_for_status()?;
@@ -152,16 +156,16 @@ impl GrafanaInstance {
     }
 
     pub async fn get_dashboard_full(&self, uid: &str) -> Result<FullDashboard, GSError> {
-        let endpoint = format!("{}{}", &self.base_url(), format!("/api/dashboards/uid/{}", uid));
+        let endpoint = format!(
+            "{}{}",
+            &self.base_url(),
+            format!("/api/dashboards/uid/{}", uid)
+        );
         let client = self.client();
 
         debug!("Requesting full dashboard of uid: {}", uid);
 
-        let response = client
-            .get(endpoint)
-            .send()
-            .await?
-            .error_for_status()?;
+        let response = client.get(endpoint).send().await?.error_for_status()?;
         let text = response.text().await?;
 
         Ok(serde_json::from_str(&text)?)
@@ -169,21 +173,25 @@ impl GrafanaInstance {
 
     #[allow(dead_code)]
     pub async fn delete_dashboard(&self, uid: &str) -> Result<(), GSError> {
-        let endpoint = format!("{}{}", &self.base_url(), format!("/api/dashboards/uid/{}", uid));
+        let endpoint = format!(
+            "{}{}",
+            &self.base_url(),
+            format!("/api/dashboards/uid/{}", uid)
+        );
         let client = self.client();
 
         debug!("Deleting dashboard with uid: {}", uid);
 
-        client
-            .delete(endpoint)
-            .send()
-            .await?
-            .error_for_status()?;
+        client.delete(endpoint).send().await?.error_for_status()?;
 
         Ok(())
     }
 
-    pub async fn get_first_dashboard_in_folder_by_name(&self, folder_uid: &str, dashboard_name: &str) -> Result<Option<SimpleDashboard>, GSError> {
+    pub async fn get_first_dashboard_in_folder_by_name(
+        &self,
+        folder_uid: &str,
+        dashboard_name: &str,
+    ) -> Result<Option<SimpleDashboard>, GSError> {
         let mut dashboards = self.get_dashboards_in_folder(folder_uid).await?;
         dashboards.retain(|d| d.title == dashboard_name);
 
@@ -193,12 +201,19 @@ impl GrafanaInstance {
     }
 
     #[allow(dead_code)]
-    pub async fn delete_dashboards_in_folder_by_name(&self, folder_uid: &str, dashboard_name: &str) -> Result<(), GSError> {
+    pub async fn delete_dashboards_in_folder_by_name(
+        &self,
+        folder_uid: &str,
+        dashboard_name: &str,
+    ) -> Result<(), GSError> {
         let mut dashboards = self.get_dashboards_in_folder(folder_uid).await?;
 
         dashboards.retain(|d| d.title == dashboard_name);
 
-        info!("Deleting {} to-be-synced dashboards from the slave", dashboards.len());
+        info!(
+            "Deleting {} to-be-synced dashboards from the slave",
+            dashboards.len()
+        );
 
         for dashboard in dashboards {
             self.delete_dashboard(&dashboard.uid).await?;
@@ -208,11 +223,19 @@ impl GrafanaInstance {
     }
 
     #[instrument]
-    pub async fn import_dashboard(&self, dashboard: &FullDashboard, folder: &Folder, overwrite: bool) -> Result<(), GSError> {
+    pub async fn import_dashboard(
+        &self,
+        dashboard: &FullDashboard,
+        folder: &Folder,
+        overwrite: bool,
+    ) -> Result<(), GSError> {
         let base_url = self.base_url().to_string();
         let endpoint = format!("{}{}", base_url, "/api/dashboards/import");
 
-        info!("Starting replication of dashboard \"{}\" onto {}", dashboard.meta.url, base_url);
+        info!(
+            "Starting replication of dashboard \"{}\" onto {}",
+            dashboard.meta.url, base_url
+        );
 
         let body = DashboardImportBody {
             dashboard: dashboard.dashboard.clone(),
@@ -224,11 +247,7 @@ impl GrafanaInstance {
         };
 
         let client = self.client();
-        let response = client
-            .post(endpoint)
-            .json(&body)
-            .send()
-            .await?;
+        let response = client.post(endpoint).json(&body).send().await?;
         let status = response.status();
 
         if status.as_u16() == 412 {
@@ -238,7 +257,10 @@ impl GrafanaInstance {
 
         let response = response.error_for_status()?;
 
-        info!("Replication of dashboard {} to {} successful", dashboard.meta.url, base_url);
+        info!(
+            "Replication of dashboard {} to {} successful",
+            dashboard.meta.url, base_url
+        );
 
         let text = response.text().await?;
         debug!("Import response: {}", text);
@@ -252,7 +274,10 @@ impl FullDashboard {
         if let serde_json::Value::Object(ref mut map) = self.dashboard {
             map.remove("id");
             match new_uid {
-                Some(uid) => map.insert("uid".to_string(), serde_json::Value::String(uid.to_string())),
+                Some(uid) => map.insert(
+                    "uid".to_string(),
+                    serde_json::Value::String(uid.to_string()),
+                ),
                 None => map.remove("uid"),
             };
         }

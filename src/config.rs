@@ -1,12 +1,12 @@
-use std::{fs, io};
+use crate::error::GSError;
+use crate::instance::GrafanaInstance;
+use log::{debug, info, warn};
+use serde_yaml::Value;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use log::{debug, info, warn};
-use serde_yaml::Value;
+use std::{fs, io};
 use tracing::instrument;
-use crate::error::GSError;
-use crate::instance::GrafanaInstance;
 
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
@@ -24,7 +24,10 @@ pub struct Config {
 impl Config {
     fn get_or_create<P: AsRef<Path>>(path: P) -> io::Result<File> {
         if !fs::exists(&path)? {
-            info!("No config file exists yet. Creating one at {}", path.as_ref().display());
+            info!(
+                "No config file exists yet. Creating one at {}",
+                path.as_ref().display()
+            );
 
             let mut file = File::create_new(&path)?;
 
@@ -39,7 +42,8 @@ impl Config {
         let mut value = config;
 
         for key in keys {
-           value = value.get(key)
+            value = value
+                .get(key)
                 .ok_or_else(|| GSError::ConfigKeyMissing(full_key.to_string()))?;
         }
 
@@ -74,24 +78,30 @@ impl Config {
         let instance_slaves = match instance_slaves {
             Err(_) => {
                 warn!("No slaves are defined.");
-                return Ok(slaves)
-            },
+                return Ok(slaves);
+            }
             Ok(slaves) => slaves,
         };
 
-        let instance_slaves = instance_slaves.as_sequence()
-            .ok_or(GSError::ConfigKeyTypeWrong("service.instance_slaves".to_string(), "Sequence"))?;
+        let instance_slaves = instance_slaves
+            .as_sequence()
+            .ok_or(GSError::ConfigKeyTypeWrong(
+                "service.instance_slaves".to_string(),
+                "Sequence",
+            ))?;
 
         for (i, instance_slave) in instance_slaves.iter().enumerate() {
             let key = format!("service.instance_slaves[{}].url", i);
-            let url = instance_slave.get("url")
+            let url = instance_slave
+                .get("url")
                 .ok_or_else(|| GSError::ConfigKeyMissing(key.clone()))?
                 .as_str()
                 .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.clone(), "String"))?
                 .to_string();
 
             let key = format!("service.instance_slaves[{}].api_token", i);
-            let api_token= instance_slave.get("api_token")
+            let api_token = instance_slave
+                .get("api_token")
                 .ok_or_else(|| GSError::ConfigKeyMissing(key.clone()))?
                 .as_str()
                 .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.clone(), "String"))?
@@ -122,8 +132,9 @@ impl Config {
             Ok(dashboard_seq) => dashboard_seq,
         };
 
-        let dashboard_seq = dashboard_seq.as_sequence()
-            .ok_or_else(|| GSError::ConfigKeyTypeWrong("service.dashboards".to_string(), "Sequence"))?;
+        let dashboard_seq = dashboard_seq.as_sequence().ok_or_else(|| {
+            GSError::ConfigKeyTypeWrong("service.dashboards".to_string(), "Sequence")
+        })?;
 
         for (i, dashboard) in dashboard_seq.iter().enumerate() {
             let key = format!("service.dashboards[{}].url", i);
@@ -131,7 +142,7 @@ impl Config {
                 None => {
                     warn!("Dashboard path at key \"{}\" is not a valid string. Use something like \"Folder/Dashboard\".", key);
                     continue;
-                },
+                }
                 Some(loc) => loc,
             };
 
@@ -149,7 +160,8 @@ impl Config {
         let config = serde_yaml::from_reader::<_, Value>(file)?;
 
         let url = Self::read_string_from_config(&config, "service.instance_master.url")?;
-        let api_token = Self::read_string_from_config(&config, "service.instance_master.api_token")?.into();
+        let api_token =
+            Self::read_string_from_config(&config, "service.instance_master.api_token")?.into();
         let sync_tag = Self::read_string_from_config(&config, "service.instance_master.sync_tag")?;
         let sync_rate_mins = Self::read_u64_from_config(&config, "service.sync_rate_mins")?;
 
@@ -175,7 +187,10 @@ impl Config {
         debug!("  - Service configuration:");
         debug!("    - Instance master:");
         debug!("      - URL: {}", self.service.instance_master.base_url());
-        debug!("      - Token: {}", self.service.instance_master.api_token().value());
+        debug!(
+            "      - Token: {}",
+            self.service.instance_master.api_token().value()
+        );
         debug!("    - Service slaves:");
 
         for (i, slave) in self.service.instance_slaves.iter().enumerate() {
