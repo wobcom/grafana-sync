@@ -257,4 +257,10 @@ impl FullDashboard {
             };
         }
     }
+
+    pub fn change_title(&mut self, new_title: String) {
+        if let serde_json::Value::Object(ref mut map) = self.dashboard {
+            map.insert("title".to_string(), serde_json::Value::String(new_title));
+        }
+    }
 }
