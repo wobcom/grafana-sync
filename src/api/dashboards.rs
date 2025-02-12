@@ -109,7 +109,7 @@ pub struct DashboardImportBody {
 impl GrafanaInstance {
     pub async fn get_tags(&mut self) -> Result<Vec<Tag>, GSError> {
         let endpoint = format!("{}{}", &self.base_url(), "/api/dashboards/tags");
-        let client = self.client()?;
+        let client = self.client();
 
         let response = client.get(endpoint)
             .send()
@@ -122,7 +122,7 @@ impl GrafanaInstance {
 
     pub async fn get_dashboards_by_tag(&mut self, tag: &str) -> Result<Vec<SimpleDashboard>, GSError> {
         let endpoint = format!("{}{}", &self.base_url(), "/api/search");
-        let client = self.client()?;
+        let client = self.client();
 
         let response = client
             .get(endpoint)
@@ -138,7 +138,7 @@ impl GrafanaInstance {
     #[allow(dead_code)]
     pub async fn get_dashboards_in_folder(&mut self, folder_uid: &str) -> Result<Vec<SimpleDashboard>, GSError> {
         let endpoint = format!("{}{}", &self.base_url(), "/api/search");
-        let client = self.client()?;
+        let client = self.client();
 
         let response = client
             .get(endpoint)
@@ -153,7 +153,7 @@ impl GrafanaInstance {
 
     pub async fn get_dashboard_full(&mut self, uid: &str) -> Result<FullDashboard, GSError> {
         let endpoint = format!("{}{}", &self.base_url(), format!("/api/dashboards/uid/{}", uid));
-        let client = self.client()?;
+        let client = self.client();
 
         debug!("Requesting full dashboard of uid: {}", uid);
 
@@ -170,7 +170,7 @@ impl GrafanaInstance {
     #[allow(dead_code)]
     pub async fn delete_dashboard(&mut self, uid: &str) -> Result<(), GSError> {
         let endpoint = format!("{}{}", &self.base_url(), format!("/api/dashboards/uid/{}", uid));
-        let client = self.client()?;
+        let client = self.client();
 
         debug!("Deleting dashboard with uid: {}", uid);
 
@@ -223,7 +223,7 @@ impl GrafanaInstance {
             // plugin_id: "".to_string(),
         };
 
-        let client = self.client()?;
+        let client = self.client();
         let response = client
             .post(endpoint)
             .json(&body)

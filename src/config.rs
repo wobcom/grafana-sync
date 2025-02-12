@@ -98,7 +98,7 @@ impl Config {
                 .to_string()
                 .into();
 
-            slaves.push(GrafanaInstance::new(url, api_token));
+            slaves.push(GrafanaInstance::new(url, api_token)?);
         }
 
         info!("Loaded {} slave(s):", instance_slaves.len());
@@ -153,7 +153,7 @@ impl Config {
         let sync_tag = Self::read_string_from_config(&config, "service.instance_master.sync_tag")?;
         let sync_rate_mins = Self::read_u64_from_config(&config, "service.sync_rate_mins")?;
 
-        let mut instance_master = GrafanaInstance::new(url, api_token);
+        let mut instance_master = GrafanaInstance::new(url, api_token)?;
         instance_master.make_master(sync_tag);
         info!("Loaded master \"{}\"", instance_master.base_url());
 
