@@ -9,7 +9,7 @@ pub struct GrafanaInstance {
     api_token: EncryptedCredential,
     is_master: bool,
     sync_tag: Option<String>,
-    running_requester: Option<reqwest::Client>,
+    http_client: Option<reqwest::Client>,
 }
 
 impl GrafanaInstance {
@@ -27,7 +27,7 @@ impl GrafanaInstance {
             api_token,
             is_master: false,
             sync_tag: None,
-            running_requester: None,
+            http_client: None,
         }
     }
 
@@ -38,7 +38,7 @@ impl GrafanaInstance {
 
     #[instrument]
     pub fn client(&mut self) -> Result<&reqwest::Client, GSError> {
-        if self.running_requester.is_none() {
+        if self.http_client.is_none() {
             let mut header_map = HeaderMap::new();
             header_map.insert("Authorization", HeaderValue::try_from(format!("Bearer {}", self.api_token.value()))?);
             header_map.insert("accept", HeaderValue::from_static("application/json"));
@@ -48,10 +48,10 @@ impl GrafanaInstance {
                 .user_agent(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
                 .build()?;
 
-            self.running_requester = Some(client);
+            self.http_client = Some(client);
         }
 
-        Ok(self.running_requester.as_ref().unwrap())
+        Ok(self.http_client.as_ref().unwrap())
     }
 
     pub fn sync_tag(&mut self) -> Option<&str> {
