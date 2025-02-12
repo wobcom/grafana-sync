@@ -7,6 +7,7 @@ use log::{debug, error, info};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Instant};
 use tracing::instrument;
@@ -70,6 +71,7 @@ impl SyncService {
     ) -> Result<(), GSError> {
         let mut full_dashboards = Vec::new();
         for dashboard in dashboards {
+            info!("Prefetching full dashboard: {}/{}", dashboard.folder_title, dashboard.title);
             let full_dashboard = self
                 .config
                 .service
@@ -77,25 +79,28 @@ impl SyncService {
                 .get_dashboard_full(&dashboard.uid)
                 .await?;
 
-            full_dashboards.push((dashboard.clone(), full_dashboard))
+            full_dashboards.push((dashboard.clone(), RwLock::new(full_dashboard)))
         }
 
-        let instance_slaves = Arc::new(self.config.service.instance_slaves.clone());
         let folder_map = Arc::new(folder_map.clone());
+        let full_dashboards = Arc::new(full_dashboards);
 
-        let tasks: Vec<JoinHandle<Result<(), GSError>>> = full_dashboards
-            .to_vec()
-            .into_iter()
-            .map(|(dashboard, mut full_dashboard)| {
-                let slaves = instance_slaves.clone();
+        let tasks: Vec<JoinHandle<Result<(), GSError>>> = self
+            .config
+            .service
+            .instance_slaves
+            .iter()
+            .map(|slave| {
                 let folder_map = folder_map.clone();
-                tokio::task::spawn(async move {
-                    info!(
-                        "Starting replication of dashboard \"{}/{}\"",
-                        dashboard.folder_title, dashboard.title
-                    );
+                let full_dashboards = full_dashboards.clone();
+                let slave = slave.clone();
+                tokio::spawn(async move {
+                    for (dashboard, full_dashboard) in full_dashboards.iter() {
+                        info!(
+                            "Starting replication of dashboard \"{}/{}\"",
+                            dashboard.folder_title, dashboard.title
+                        );
 
-                    for slave in slaves.iter() {
                         let Some(slave_folder_map) = folder_map.get(slave.base_url()) else {
                             error!("Slave {} is out of sync (Unauthorized?)", slave.base_url());
                             continue;
@@ -116,22 +121,26 @@ impl SyncService {
                             }
                             None => info!("Performing new dashboard sync"),
                         }
-                        full_dashboard.sanitize(old_dashboard.as_ref().map(|d| d.uid.as_str()));
 
+                        let mut full_dashboard = full_dashboard.write().await;
+                        full_dashboard.sanitize(Some(&dashboard.uid));
                         slave
                             .import_dashboard(&full_dashboard, &folder, true)
                             .await?;
                     }
-
                     Ok(())
                 })
             })
             .collect();
 
-
+        debug!("Starting import task executor");
         let start = Instant::now();
-        future::join_all(tasks).await;
-        println!("All dashboards were synced in {:?}", start.elapsed());
+        future::join_all(tasks).await
+            .into_iter()
+            .filter_map(|r| r.err())
+
+            .for_each(|r| error!("Error occurred while syncing dashboard: {r}"));
+        info!("All dashboards were synced in {:?}", start.elapsed());
 
         Ok(())
     }
