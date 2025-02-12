@@ -1,6 +1,6 @@
+use std::collections::VecDeque;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tracing::instrument;
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
@@ -183,12 +183,36 @@ impl GrafanaInstance {
         Ok(())
     }
 
+    pub async fn get_first_dashboard_in_folder_by_name(&mut self, folder_uid: &str, dashboard_name: &str) -> Result<Option<SimpleDashboard>, GSError> {
+        let mut dashboards = self.get_dashboards_in_folder(folder_uid).await?;
+        dashboards.retain(|d| d.title == dashboard_name);
+
+        let mut dashboards = VecDeque::from(dashboards);
+
+        Ok(dashboards.pop_front())
+    }
+
+    #[allow(dead_code)]
+    pub async fn delete_dashboards_in_folder_by_name(&mut self, folder_uid: &str, dashboard_name: &str) -> Result<(), GSError> {
+        let mut dashboards = self.get_dashboards_in_folder(folder_uid).await?;
+
+        dashboards.retain(|d| d.title == dashboard_name);
+
+        info!("Deleting {} to-be-synced dashboards from the slave", dashboards.len());
+
+        for dashboard in dashboards {
+            self.delete_dashboard(&dashboard.uid).await?;
+        }
+
+        Ok(())
+    }
+
     #[instrument]
     pub async fn import_dashboard(&mut self, dashboard: &FullDashboard, folder: &Folder, overwrite: bool) -> Result<(), GSError> {
         let base_url = self.base_url().to_string();
         let endpoint = format!("{}{}", base_url, "/api/dashboards/import");
 
-        info!("Syncing dashboard \"{}\" to {}", dashboard.meta.url, base_url);
+        info!("Starting replication of dashboard \"{}\" onto {}", dashboard.meta.url, base_url);
 
         let body = DashboardImportBody {
             dashboard: dashboard.dashboard.clone(),
@@ -224,10 +248,13 @@ impl GrafanaInstance {
 }
 
 impl FullDashboard {
-    pub fn sanitize(&mut self) {
-        if let Value::Object(ref mut map) = self.dashboard {
-            map.remove("uid");
+    pub fn sanitize(&mut self, new_uid: Option<&str>) {
+        if let serde_json::Value::Object(ref mut map) = self.dashboard {
             map.remove("id");
+            match new_uid {
+                Some(uid) => map.insert("uid".to_string(), serde_json::Value::String(uid.to_string())),
+                None => map.remove("uid"),
+            };
         }
     }
 }

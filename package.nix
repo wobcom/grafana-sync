@@ -25,7 +25,7 @@ rustPlatform.buildRustPackage rec {
 
   buildInputs = [ perl pkg-config openssl ];
 
-  cargoHash = "sha256-l0Tt8yEevALC8Hpj/A+Xu0tkDXPsuX8l5qOBIRB/Tf0=";
+  cargoHash = "sha256-95YnpkVw3QHrAPdjurqtEkXbV9on8VjDs+VnqnhaMTI=";
 
   #installPhase = ''
   #  runHook preInstall

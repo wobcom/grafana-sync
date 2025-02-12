@@ -1,5 +1,6 @@
 use std::time::Duration;
 use chrono::Local;
+use futures::future;
 use log::{debug, error, info};
 use tokio::time::sleep;
 use tracing::instrument;
@@ -27,6 +28,7 @@ impl SyncService {
     }
 
     pub async fn replicate_to_slaves(&mut self, dashboard: &SimpleDashboard) -> Result<(), GSError> {
+        info!("Starting replication of dashboard \"{}/{}\"", dashboard.folder_title, dashboard.title);
         let mut slave_folders: Vec<(&mut GrafanaInstance, Folder)> = Vec::new();
         for slave in &mut self.config.service.instance_slaves {
             match slave.ensure_folder(&dashboard.folder_title).await {
@@ -40,9 +42,15 @@ impl SyncService {
         }
 
         let mut full_dashboard = self.config.service.instance_master.get_dashboard_full(&dashboard.uid).await?;
-        full_dashboard.sanitize();
         for (slave, folder) in slave_folders {
-            info!("Starting replication of \"{}\" onto {}", dashboard.title, slave.base_url());
+            // Override or create new dashboard
+            let old_dashboard = slave.get_first_dashboard_in_folder_by_name(&folder.uid, &dashboard.title).await?;
+            match &old_dashboard {
+                Some(d) => info!("Performing overwriting dashboard sync. Target: {}", d.uid),
+                None => info!("Performing new dashboard sync"),
+            }
+            full_dashboard.sanitize(old_dashboard.as_ref().map(|d| d.uid.as_str()));
+
             slave.import_dashboard(&full_dashboard, &folder, true).await?;
         }
 
@@ -67,8 +75,21 @@ impl SyncService {
 
             debug!("Master Dashboards with synctag: {:?}", &dashboards);
 
-            for dashboard in &dashboards {
-                self.replicate_to_slaves(dashboard).await?;
+            let tasks: Vec<_> = dashboards
+                .into_iter()
+                .map(|dashboard| {
+                    let mut service = self.clone();
+                    tokio::spawn(async move {
+                        service.replicate_to_slaves(&dashboard).await
+                    })
+            }).collect();
+
+            for a in future::join_all(tasks).await {
+                match a {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => error!("Couldn't sync dashboard. Error: {e}"),
+                    Err(e) => error!("Couldn't sync dashboard. Error: {e}")
+                }
             }
 
             self.wait_for_next_sync().await;
