@@ -13,7 +13,7 @@ struct FolderBody {
 }
 
 impl GrafanaInstance {
-    pub async fn get_all_folders(&mut self) -> Result<Vec<Folder>, GSError> {
+    pub async fn get_all_folders(&self) -> Result<Vec<Folder>, GSError> {
         let endpoint = format!("{}{}", &self.base_url(), "/api/folders");
         let client = self.client();
 
@@ -29,7 +29,7 @@ impl GrafanaInstance {
     }
 
     // returns the folder uid on the instance
-    pub async fn ensure_folder(&mut self, title: &str) -> Result<Folder, GSError> {
+    pub async fn ensure_folder(&self, title: &str) -> Result<Folder, GSError> {
         debug!("Ensuring folder {} exists on {}...", title, self.base_url());
         let matching_folder = self.get_all_folders()
             .await?
