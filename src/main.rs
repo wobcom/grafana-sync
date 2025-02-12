@@ -1,7 +1,7 @@
 #![feature(duration_constructors)]
 
 use std::env;
-use log::{error, info};
+use log::{error, info, LevelFilter};
 use tracing::instrument;
 use crate::config::Config;
 use crate::error::GSError;
@@ -24,7 +24,11 @@ async fn main() {
 
 #[instrument]
 async fn run() -> Result<(), GSError> {
-    env_logger::init();
+    env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        .format_target(false)
+        .parse_default_env()
+        .init();
 
     let args: Vec<String> = env::args().collect();
     let config_path = args.get(1)

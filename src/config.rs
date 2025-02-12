@@ -101,7 +101,7 @@ impl Config {
             slaves.push(GrafanaInstance::new(url, api_token));
         }
 
-        info!("Loaded {} slaves:", instance_slaves.len());
+        info!("Loaded {} slave(s):", instance_slaves.len());
         for slave in &slaves {
             info!("  - {}", slave.base_url());
         }
