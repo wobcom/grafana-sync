@@ -2,7 +2,6 @@ use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use tracing::instrument;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -89,7 +88,7 @@ pub struct Folder {
     pub title: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FullDashboard {
     pub dashboard: serde_json::Value,
     pub meta: FullDashboardMeta,
@@ -185,19 +184,6 @@ impl GrafanaInstance {
         client.delete(endpoint).send().await?.error_for_status()?;
 
         Ok(())
-    }
-
-    pub async fn get_first_dashboard_in_folder_by_name(
-        &self,
-        folder_uid: &str,
-        dashboard_name: &str,
-    ) -> Result<Option<SimpleDashboard>, GSError> {
-        let mut dashboards = self.get_dashboards_in_folder(folder_uid).await?;
-        dashboards.retain(|d| d.title == dashboard_name);
-
-        let mut dashboards = VecDeque::from(dashboards);
-
-        Ok(dashboards.pop_front())
     }
 
     #[allow(dead_code)]

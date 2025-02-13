@@ -67,13 +67,10 @@ impl SyncService {
 
     pub async fn replicate_dashboards_to_slaves(
         &self,
-        dashboards: &[SimpleDashboard],
+        full_dashboards: Arc<Vec<(SimpleDashboard, RwLock<FullDashboard>)>>,
         folder_map: &FolderMap,
     ) -> Result<(), GSError> {
-        let full_dashboards = self.prefetch_full_dashboards_from_master(dashboards).await?;
-
         let folder_map = Arc::new(folder_map.clone());
-        let full_dashboards = Arc::new(full_dashboards);
 
         let tasks: Vec<JoinHandle<Result<(), GSError>>> = self
             .config
@@ -143,8 +140,8 @@ impl SyncService {
         full_dashboard: &RwLock<FullDashboard>,
     ) -> Result<(), GSError> {
         info!(
-            "Starting replication of dashboard \"{}/{}\"",
-            dashboard.folder_title, dashboard.title
+            "Replicating dashboard \"{}/{}\" to {}",
+            dashboard.folder_title, dashboard.title, slave.base_url()
         );
 
         let Some(slave_folder_map) = folder_map.get(slave.base_url()) else {
@@ -157,61 +154,112 @@ impl SyncService {
             return Ok(());
         };
 
-        // Override or create new dashboard
-        let old_dashboard = slave
-            .get_first_dashboard_in_folder_by_name(&folder.uid, &dashboard.title)
-            .await?;
-        match &old_dashboard {
-            Some(d) => {
-                info!("Performing overwriting dashboard sync. Target: {}", d.uid)
-            }
-            None => info!("Performing new dashboard sync"),
-        }
-
         let mut full_dashboard = full_dashboard.write().await;
         full_dashboard.sanitize(Some(&dashboard.uid));
         slave
-            .import_dashboard(&full_dashboard, &folder, true)
+            .import_dashboard(&full_dashboard, folder, true)
             .await?;
 
         Ok(())
     }
 
+    pub async fn delete_all_synctag_dashboards_from_slaves(&self, sync_tag: &str) -> Result<(), GSError> {
+        let tasks = self.config.service.instance_slaves.iter().map(|slave| {
+            let slave = slave.clone();
+            let sync_tag = sync_tag.to_string();
+            tokio::spawn(async move {
+                info!("Fetching all synced dashboards on slave {}", slave.base_url());
+                let dashboards = slave.get_dashboards_by_tag(&sync_tag).await?;
+
+                for dashboard in dashboards {
+                    info!("{dashboard:?}");
+                    info!("Deleting synced dashboard {}/{}", dashboard.folder_title, dashboard.title);
+                    slave.delete_dashboard(&dashboard.uid).await?;
+                }
+
+                Ok(())
+            })
+        }).collect::<Vec<_>>();
+
+        future::join_all(tasks)
+            .await
+            .into_iter()
+            .filter_map(|r| r.ok())
+            .next()
+            .unwrap_or(Ok(()))
+    }
+
+    pub async fn delete_empty_folders_on_slaves(&self) -> Result<(), GSError> {
+        for slave in &self.config.service.instance_slaves {
+            let all_folders = slave.get_all_folders().await?;
+
+            for folder in all_folders {
+                if slave.get_dashboards_in_folder(&folder.uid).await?.is_empty() {
+                    info!("Deleting empty folder {}", folder.title);
+                    slave.remove_folder(&folder.uid).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn run_sync_cycle(&self) -> Result<(), GSError> {
+        let sync_tag = self
+            .config
+            .service
+            .instance_master
+            .sync_tag()
+            .expect("Sync tag should always be set for a master instance");
+
+        self.check_sync_tag_exists_on_master(sync_tag).await?;
+
+        info!("Fetching all dashboards with sync tag on {}", self.config.service.instance_master.base_url());
+        let dashboards = self
+            .config
+            .service
+            .instance_master
+            .get_dashboards_by_tag(sync_tag)
+            .await?;
+
+        debug!("Master Dashboards with synctag: {:?}", &dashboards);
+
+        info!("Prefetching all sync dashboards");
+        let full_dashboards = self
+            .prefetch_full_dashboards_from_master(&dashboards)
+            .await?;
+
+        self.delete_all_synctag_dashboards_from_slaves(sync_tag).await?;
+
+        let folder_map = self.replicate_folders_to_slaves(&dashboards).await;
+
+        let full_dashboards = Arc::new(full_dashboards);
+        self.replicate_dashboards_to_slaves(full_dashboards, &folder_map)
+            .await?;
+
+        self.delete_empty_folders_on_slaves().await?;
+
+        Ok(())
+    }
+
+    async fn check_sync_tag_exists_on_master(&self, sync_tag: &str) -> Result<(), GSError> {
+        let tags = self.config.service.instance_master.get_tags().await?;
+        debug!("Master Tags: {tags:?}");
+
+        if !tags.iter().any(|tag| tag.term == sync_tag) {
+            Err(GSError::SyncTagMissing(sync_tag.to_string()))
+        } else {
+            Ok(())
+        }
+    }
+
     #[instrument]
     pub async fn run(&mut self) -> Result<(), GSError> {
         loop {
-            let tags = self.config.service.instance_master.get_tags().await?;
-            debug!("Master Tags: {tags:?}");
-
-            let sync_tag = self
-                .config
-                .service
-                .instance_master
-                .sync_tag()
-                .unwrap()
-                .to_owned();
-            if !tags.iter().any(|tag| tag.term == sync_tag) {
-                error!(
-                    "The sync tag {} does not exist on the master. Cannot sync.",
-                    sync_tag
-                );
-                self.wait_for_next_sync().await;
-                continue;
+            match self.run_sync_cycle().await {
+                Ok(_) => info!("Sync completed successfully"),
+                Err(e) => error!("Sync error: {e}"),
             }
-
-            let dashboards = self
-                .config
-                .service
-                .instance_master
-                .get_dashboards_by_tag(&sync_tag)
-                .await?;
-
-            debug!("Master Dashboards with synctag: {:?}", &dashboards);
-
-            let folder_map = self.replicate_folders_to_slaves(&dashboards).await;
-            self.replicate_dashboards_to_slaves(&dashboards, &folder_map)
-                .await?;
-
             self.wait_for_next_sync().await;
         }
     }

@@ -19,4 +19,6 @@ pub enum GSError {
     JSONError(#[from] serde_json::error::Error),
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
+    #[error("The sync tag {0} does not exist on the master instance. Cannot sync.")]
+    SyncTagMissing(String),
 }

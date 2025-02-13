@@ -62,7 +62,7 @@ impl GrafanaInstance {
         &self.http_client
     }
 
-    pub fn sync_tag(&mut self) -> Option<&str> {
+    pub fn sync_tag(&self) -> Option<&str> {
         Some(self.sync_tag.as_ref()?.as_str())
     }
 }

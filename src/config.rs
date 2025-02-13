@@ -12,7 +12,6 @@ use tracing::instrument;
 pub struct ServiceConfig {
     pub instance_master: GrafanaInstance,
     pub instance_slaves: Vec<GrafanaInstance>,
-    pub dashboard: Vec<String>,
     pub sync_rate_mins: u64,
 }
 
@@ -119,41 +118,6 @@ impl Config {
         Ok(slaves)
     }
 
-    fn collect_dashboards(config: &Value) -> Result<Vec<String>, GSError> {
-        let mut dashboards = Vec::new();
-
-        let dashboard_seq = Self::get_yaml_path(config, "service.dashboards");
-
-        let dashboard_seq = match dashboard_seq {
-            Err(_) => {
-                warn!("No dashboard is defined.");
-                return Ok(dashboards);
-            }
-            Ok(dashboard_seq) => dashboard_seq,
-        };
-
-        let dashboard_seq = dashboard_seq.as_sequence().ok_or_else(|| {
-            GSError::ConfigKeyTypeWrong("service.dashboards".to_string(), "Sequence")
-        })?;
-
-        for (i, dashboard) in dashboard_seq.iter().enumerate() {
-            let key = format!("service.dashboards[{}].url", i);
-            let location = match dashboard.as_str() {
-                None => {
-                    warn!("Dashboard path at key \"{}\" is not a valid string. Use something like \"Folder/Dashboard\".", key);
-                    continue;
-                }
-                Some(loc) => loc,
-            };
-
-            dashboards.push(location.to_string());
-        }
-
-        info!("Registered {} dashboards for syncing.", dashboards.len());
-
-        Ok(dashboards)
-    }
-
     pub fn use_config_file<P: AsRef<Path>>(path: P) -> Result<Config, GSError> {
         let file = Self::get_or_create(&path)?;
 
@@ -170,13 +134,11 @@ impl Config {
         info!("Loaded master \"{}\"", instance_master.base_url());
 
         let instance_slaves = Self::collect_slaves(&config)?;
-        let dashboards = Self::collect_dashboards(&config)?;
 
         Ok(Config {
             service: ServiceConfig {
                 instance_master,
                 instance_slaves,
-                dashboard: dashboards,
                 sync_rate_mins,
             },
         })
@@ -197,12 +159,6 @@ impl Config {
             debug!("      + Slave #{i}:");
             debug!("        - URL: {}", slave.base_url());
             debug!("        - Token: {}", slave.api_token().value());
-        }
-
-        debug!("    - Synced Dashboards:");
-        for (i, board) in self.service.dashboard.iter().enumerate() {
-            debug!("      + Dashboard #{i}:");
-            debug!("        - Path: {}", board);
         }
     }
 }

@@ -66,4 +66,19 @@ impl GrafanaInstance {
 
         Ok(folder)
     }
+    
+    pub async fn remove_folder(&self, uid: &str) -> Result<(), GSError> {
+        let endpoint = format!(
+            "{}{}",
+            &self.base_url(),
+            format!("/api/folders/{}", uid)
+        );
+        let client = self.client();
+
+        debug!("Deleting folder with uid: {}", uid);
+
+        client.delete(endpoint).send().await?.error_for_status()?;
+
+        Ok(())
+    }
 }
