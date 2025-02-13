@@ -1,6 +1,6 @@
 service:
   instance_master:
-    url: "https://dashboard.service.wobcom.de"
+    url: "https://dashboard.lab.wobcom.de"
     api_token: "meow1234"
     sync_tag: "MagicSync"
 
