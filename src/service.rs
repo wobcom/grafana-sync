@@ -1,6 +1,7 @@
-use crate::api::dashboards::{Folder, SimpleDashboard};
+use crate::api::dashboards::{Folder, FullDashboard, SimpleDashboard};
 use crate::config::Config;
 use crate::error::GSError;
+use crate::instance::GrafanaInstance;
 use chrono::Local;
 use futures::future;
 use log::{debug, error, info};
@@ -69,18 +70,7 @@ impl SyncService {
         dashboards: &[SimpleDashboard],
         folder_map: &FolderMap,
     ) -> Result<(), GSError> {
-        let mut full_dashboards = Vec::new();
-        for dashboard in dashboards {
-            info!("Prefetching full dashboard: {}/{}", dashboard.folder_title, dashboard.title);
-            let full_dashboard = self
-                .config
-                .service
-                .instance_master
-                .get_dashboard_full(&dashboard.uid)
-                .await?;
-
-            full_dashboards.push((dashboard.clone(), RwLock::new(full_dashboard)))
-        }
+        let full_dashboards = self.prefetch_full_dashboards_from_master(dashboards).await?;
 
         let folder_map = Arc::new(folder_map.clone());
         let full_dashboards = Arc::new(full_dashboards);
@@ -95,52 +85,94 @@ impl SyncService {
                 let full_dashboards = full_dashboards.clone();
                 let slave = slave.clone();
                 tokio::spawn(async move {
-                    for (dashboard, full_dashboard) in full_dashboards.iter() {
-                        info!(
-                            "Starting replication of dashboard \"{}/{}\"",
-                            dashboard.folder_title, dashboard.title
-                        );
-
-                        let Some(slave_folder_map) = folder_map.get(slave.base_url()) else {
-                            error!("Slave {} is out of sync (Unauthorized?)", slave.base_url());
-                            continue;
-                        };
-
-                        let Some(folder) = slave_folder_map.get(&dashboard.folder_title) else {
-                            error!("Slave {} is out of sync. (Unauthorized?)", slave.base_url());
-                            continue;
-                        };
-
-                        // Override or create new dashboard
-                        let old_dashboard = slave
-                            .get_first_dashboard_in_folder_by_name(&folder.uid, &dashboard.title)
-                            .await?;
-                        match &old_dashboard {
-                            Some(d) => {
-                                info!("Performing overwriting dashboard sync. Target: {}", d.uid)
-                            }
-                            None => info!("Performing new dashboard sync"),
-                        }
-
-                        let mut full_dashboard = full_dashboard.write().await;
-                        full_dashboard.sanitize(Some(&dashboard.uid));
-                        slave
-                            .import_dashboard(&full_dashboard, &folder, true)
-                            .await?;
-                    }
-                    Ok(())
+                    Self::replicate_dashboards_to_slave(folder_map, full_dashboards, slave).await
                 })
             })
             .collect();
 
         debug!("Starting import task executor");
         let start = Instant::now();
-        future::join_all(tasks).await
+        future::join_all(tasks)
+            .await
             .into_iter()
             .filter_map(|r| r.err())
-
             .for_each(|r| error!("Error occurred while syncing dashboard: {r}"));
         info!("All dashboards were synced in {:?}", start.elapsed());
+
+        Ok(())
+    }
+
+    async fn prefetch_full_dashboards_from_master(
+        &self,
+        dashboards: &[SimpleDashboard],
+    ) -> Result<Vec<(SimpleDashboard, RwLock<FullDashboard>)>, GSError> {
+        let mut full_dashboards = Vec::new();
+        for dashboard in dashboards {
+            info!(
+                "Prefetching full dashboard: {}/{}",
+                dashboard.folder_title, dashboard.title
+            );
+            let full_dashboard = self
+                .config
+                .service
+                .instance_master
+                .get_dashboard_full(&dashboard.uid)
+                .await?;
+
+            full_dashboards.push((dashboard.clone(), RwLock::new(full_dashboard)))
+        }
+        Ok(full_dashboards)
+    }
+
+    async fn replicate_dashboards_to_slave(
+        folder_map: Arc<HashMap<String, HashMap<String, Folder>>>,
+        full_dashboards: Arc<Vec<(SimpleDashboard, RwLock<FullDashboard>)>>,
+        slave: GrafanaInstance,
+    ) -> Result<(), GSError> {
+        for (dashboard, full_dashboard) in full_dashboards.iter() {
+            Self::replicate_dashboard_to_slave(&folder_map, &slave, dashboard, full_dashboard)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn replicate_dashboard_to_slave(
+        folder_map: &Arc<HashMap<String, HashMap<String, Folder>>>,
+        slave: &GrafanaInstance,
+        dashboard: &SimpleDashboard,
+        full_dashboard: &RwLock<FullDashboard>,
+    ) -> Result<(), GSError> {
+        info!(
+            "Starting replication of dashboard \"{}/{}\"",
+            dashboard.folder_title, dashboard.title
+        );
+
+        let Some(slave_folder_map) = folder_map.get(slave.base_url()) else {
+            error!("Slave {} is out of sync (Unauthorized?)", slave.base_url());
+            return Ok(());
+        };
+
+        let Some(folder) = slave_folder_map.get(&dashboard.folder_title) else {
+            error!("Slave {} is out of sync. (Unauthorized?)", slave.base_url());
+            return Ok(());
+        };
+
+        // Override or create new dashboard
+        let old_dashboard = slave
+            .get_first_dashboard_in_folder_by_name(&folder.uid, &dashboard.title)
+            .await?;
+        match &old_dashboard {
+            Some(d) => {
+                info!("Performing overwriting dashboard sync. Target: {}", d.uid)
+            }
+            None => info!("Performing new dashboard sync"),
+        }
+
+        let mut full_dashboard = full_dashboard.write().await;
+        full_dashboard.sanitize(Some(&dashboard.uid));
+        slave
+            .import_dashboard(&full_dashboard, &folder, true)
+            .await?;
 
         Ok(())
     }

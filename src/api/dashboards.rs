@@ -272,6 +272,7 @@ impl GrafanaInstance {
 impl FullDashboard {
     pub fn sanitize(&mut self, new_uid: Option<&str>) {
         if let serde_json::Value::Object(ref mut map) = self.dashboard {
+            // posting the dashboard with an id results in a Bad Request
             map.remove("id");
             match new_uid {
                 Some(uid) => map.insert(
