@@ -13,6 +13,7 @@ mod config;
 mod error;
 mod instance;
 pub mod api;
+mod dashboard_state;
 
 #[tokio::main]
 async fn main() {
@@ -53,20 +54,19 @@ fn create_1000_dashboards_on_master() {
         .map(|str| str.as_str())
         .unwrap_or("config.yaml");
 
-    let mut config = Config::use_config_file(config_path).unwrap();
+    let config = Config::use_config_file(config_path).unwrap();
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
-    let mut dash = runtime.block_on(config.service.instance_master.get_dashboard_full("ee2blhu68eqyod")).unwrap();
+    let mut dash = runtime.block_on(config.instances[0].get_dashboard_full("ee2blhu68eqyod")).unwrap();
     let folder = Folder {
         id: dash.meta.folder_id as u32,
         uid: dash.meta.folder_uid.clone(),
         title: dash.meta.folder_title.clone(),
     };
 
-    dash.sanitize(None);
     for i in 0..1000 {
-        dash.change_title(format!("MeowBoard {i} :3"));
-        runtime.block_on(config.service.instance_master.import_dashboard(&dash, &folder, false)).unwrap();
+        dash.dashboard.title = format!("MeowBoard {i} :3");
+        runtime.block_on(config.instances[0].import_dashboard(&dash, &folder, false)).unwrap();
     }
 }

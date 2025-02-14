@@ -7,8 +7,6 @@ use tracing::instrument;
 pub struct GrafanaInstance {
     url: String,
     api_token: EncryptedCredential,
-    is_master: bool,
-    sync_tag: Option<String>,
     http_client: reqwest::Client,
 }
 
@@ -38,8 +36,6 @@ impl GrafanaInstance {
         Ok(GrafanaInstance {
             url,
             api_token,
-            is_master: false,
-            sync_tag: None,
             http_client,
         })
     }
@@ -52,17 +48,8 @@ impl GrafanaInstance {
         &self.api_token
     }
 
-    pub fn make_master(&mut self, sync_tag: String) {
-        self.is_master = true;
-        self.sync_tag = Some(sync_tag);
-    }
-
     #[instrument]
     pub fn client(&self) -> &reqwest::Client {
         &self.http_client
-    }
-
-    pub fn sync_tag(&self) -> Option<&str> {
-        Some(self.sync_tag.as_ref()?.as_str())
     }
 }

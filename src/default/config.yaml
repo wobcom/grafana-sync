@@ -1,15 +1,12 @@
-service:
-  instance_master:
-    url: "https://dashboard.lab.wobcom.de"
+sync_tag: "MagicSync"
+instances:
+  - url: "https://dashboard.lab.wobcom.de"
     api_token: "meow1234"
-    sync_tag: "MagicSync"
+  - url: "https://localhost:4431"
+    api_token: "meow1234"
+  - url: "https://localhost:4432"
+    api_token: "meow1234"
+  - url: "https://localhost:4433"
+    api_token: "meow1234"
 
-  instance_slaves:
-    - url: "https://localhost:4431"
-      api_token: "meow1234"
-    - url: "https://localhost:4432"
-      api_token: "meow1234"
-    - url: "https://localhost:4433"
-      api_token: "meow1234"
-
-  sync_rate_mins: 10
+sync_rate_mins: 1

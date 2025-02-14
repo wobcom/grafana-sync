@@ -40,6 +40,21 @@ impl EncryptedCredential {
 
         string
     }
+
+    #[instrument]
+    pub fn checkable_obfuscated(&self) -> String {
+        self.value()
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i < 4 || !c.is_alphanumeric() {
+                    c
+                } else {
+                    'x'
+                }
+            })
+            .collect()
+    }
 }
 
 impl Debug for EncryptedCredential {

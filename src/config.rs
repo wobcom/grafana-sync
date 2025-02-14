@@ -9,15 +9,10 @@ use std::{fs, io};
 use tracing::instrument;
 
 #[derive(Debug, Clone)]
-pub struct ServiceConfig {
-    pub instance_master: GrafanaInstance,
-    pub instance_slaves: Vec<GrafanaInstance>,
-    pub sync_rate_mins: u64,
-}
-
-#[derive(Debug, Clone)]
 pub struct Config {
-    pub service: ServiceConfig,
+    pub instances: Vec<GrafanaInstance>,
+    pub sync_tag: String,
+    pub sync_rate_mins: u64,
 }
 
 impl Config {
@@ -69,37 +64,37 @@ impl Config {
     }
 
     #[instrument]
-    fn collect_slaves(config: &Value) -> Result<Vec<GrafanaInstance>, GSError> {
-        let mut slaves = Vec::new();
+    fn collect_instances(config: &Value) -> Result<Vec<GrafanaInstance>, GSError> {
+        let mut instances = Vec::new();
 
-        let instance_slaves = Self::get_yaml_path(config, "service.instance_slaves");
+        let cfg_instances = Self::get_yaml_path(config, "instances");
 
-        let instance_slaves = match instance_slaves {
+        let json_instances = match cfg_instances {
             Err(_) => {
-                warn!("No slaves are defined.");
-                return Ok(slaves);
+                warn!("No instances are defined.");
+                return Ok(instances);
             }
-            Ok(slaves) => slaves,
+            Ok(instances) => instances,
         };
 
-        let instance_slaves = instance_slaves
+        let json_instances = json_instances
             .as_sequence()
             .ok_or(GSError::ConfigKeyTypeWrong(
-                "service.instance_slaves".to_string(),
+                "instances".to_string(),
                 "Sequence",
             ))?;
 
-        for (i, instance_slave) in instance_slaves.iter().enumerate() {
-            let key = format!("service.instance_slaves[{}].url", i);
-            let url = instance_slave
+        for (i, instance) in json_instances.iter().enumerate() {
+            let key = format!("instances[{}].url", i);
+            let url = instance
                 .get("url")
                 .ok_or_else(|| GSError::ConfigKeyMissing(key.clone()))?
                 .as_str()
                 .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.clone(), "String"))?
                 .to_string();
 
-            let key = format!("service.instance_slaves[{}].api_token", i);
-            let api_token = instance_slave
+            let key = format!("instances[{}].api_token", i);
+            let api_token = instance
                 .get("api_token")
                 .ok_or_else(|| GSError::ConfigKeyMissing(key.clone()))?
                 .as_str()
@@ -107,15 +102,15 @@ impl Config {
                 .to_string()
                 .into();
 
-            slaves.push(GrafanaInstance::new(url, api_token)?);
+            instances.push(GrafanaInstance::new(url, api_token)?);
         }
 
-        info!("Loaded {} slave(s):", instance_slaves.len());
-        for slave in &slaves {
-            info!("  - {}", slave.base_url());
+        info!("Loaded {} instance(s):", json_instances.len());
+        for instance in &instances {
+            info!("  - {}", instance.base_url());
         }
 
-        Ok(slaves)
+        Ok(instances)
     }
 
     pub fn use_config_file<P: AsRef<Path>>(path: P) -> Result<Config, GSError> {
@@ -123,42 +118,27 @@ impl Config {
 
         let config = serde_yaml::from_reader::<_, Value>(file)?;
 
-        let url = Self::read_string_from_config(&config, "service.instance_master.url")?;
-        let api_token =
-            Self::read_string_from_config(&config, "service.instance_master.api_token")?.into();
-        let sync_tag = Self::read_string_from_config(&config, "service.instance_master.sync_tag")?;
-        let sync_rate_mins = Self::read_u64_from_config(&config, "service.sync_rate_mins")?;
+        let sync_tag = Self::read_string_from_config(&config, "sync_tag")?;
+        let sync_rate_mins = Self::read_u64_from_config(&config, "sync_rate_mins")?;
 
-        let mut instance_master = GrafanaInstance::new(url, api_token)?;
-        instance_master.make_master(sync_tag);
-        info!("Loaded master \"{}\"", instance_master.base_url());
-
-        let instance_slaves = Self::collect_slaves(&config)?;
+        let instances = Self::collect_instances(&config)?;
 
         Ok(Config {
-            service: ServiceConfig {
-                instance_master,
-                instance_slaves,
-                sync_rate_mins,
-            },
+            sync_tag,
+            instances,
+            sync_rate_mins,
         })
     }
 
     pub(crate) fn dbg_print(&self) {
         debug!("Full configuration:");
-        debug!("  - Service configuration:");
-        debug!("    - Instance master:");
-        debug!("      - URL: {}", self.service.instance_master.base_url());
-        debug!(
-            "      - Token: {}",
-            self.service.instance_master.api_token().value()
-        );
-        debug!("    - Service slaves:");
 
-        for (i, slave) in self.service.instance_slaves.iter().enumerate() {
-            debug!("      + Slave #{i}:");
-            debug!("        - URL: {}", slave.base_url());
-            debug!("        - Token: {}", slave.api_token().value());
+        debug!("  + Sync Tag: {}", self.sync_tag);
+        debug!("  + Sync Rate: {}", self.sync_rate_mins);
+        for (i, instance) in self.instances.iter().enumerate() {
+            debug!("  + Instance: #{i}:");
+            debug!("    - URL: {}", instance.base_url());
+            debug!("    - Token: {}", instance.api_token().checkable_obfuscated());
         }
     }
 }

@@ -81,4 +81,17 @@ impl GrafanaInstance {
 
         Ok(())
     }
+    
+    pub async fn remove_empty_folders(&self) -> Result<(), GSError> {
+        let all_folders = self.get_all_folders().await?;
+
+        for folder in all_folders {
+            if self.get_dashboards_in_folder(&folder.uid).await?.is_empty() {
+                info!("Deleting empty folder {}", folder.title);
+                self.remove_folder(&folder.uid).await?;
+            }
+        }
+        
+        Ok(())
+    }
 }

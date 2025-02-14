@@ -1,7 +1,9 @@
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
+use chrono::{DateTime, Local};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 use tracing::instrument;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -39,9 +41,9 @@ pub struct FullDashboardMeta {
     pub can_edit: bool,
     pub can_save: bool,
     pub can_star: bool,
-    pub created: String,
+    pub created: DateTime<Local>,
     pub created_by: String,
-    pub expires: String,
+    pub expires: DateTime<Local>,
     pub folder_id: i64,
     pub folder_title: String,
     pub folder_uid: String,
@@ -53,10 +55,31 @@ pub struct FullDashboardMeta {
     pub slug: String,
     #[serde(rename = "type")]
     pub type_field: String,
-    pub updated: String,
+    pub updated: DateTime<Local>,
     pub updated_by: String,
     pub url: String,
     pub version: i64,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FullDashboardData {
+    pub annotations: serde_json::Value,
+    pub editable: bool,
+    pub fiscal_year_start_month: i32,
+    pub graph_tooltip: i32,
+    pub links: Vec<String>,
+    pub panels: Vec<serde_json::Value>,
+    pub schema_version: i32,
+    pub tags: Vec<String>,
+    pub templating: serde_json::Value,
+    pub time: serde_json::Value,
+    pub timepicker: serde_json::Value,
+    pub timezone: String,
+    pub title: String,
+    pub uid: String,
+    pub version: i32,
+    pub week_start: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -90,14 +113,14 @@ pub struct Folder {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FullDashboard {
-    pub dashboard: serde_json::Value,
+    pub dashboard: FullDashboardData,
     pub meta: FullDashboardMeta,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardImportBody {
-    pub dashboard: serde_json::Value,
+    pub dashboard: FullDashboardData,
     pub folder_uid: String,
     pub inputs: Vec<serde_json::Value>,
     pub overwrite: bool,
@@ -105,9 +128,10 @@ pub struct DashboardImportBody {
     // pub plugin_id: String,
 }
 
+#[allow(dead_code)]
 impl GrafanaInstance {
     pub async fn get_tags(&self) -> Result<Vec<Tag>, GSError> {
-        let endpoint = format!("{}{}", &self.base_url(), "/api/dashboards/tags");
+        let endpoint = format!("{}/api/dashboards/tags", &self.base_url());
         let client = self.client();
 
         let response = client.get(endpoint).send().await?.error_for_status()?;
@@ -117,7 +141,7 @@ impl GrafanaInstance {
     }
 
     pub async fn get_dashboards_by_tag(&self, tag: &str) -> Result<Vec<SimpleDashboard>, GSError> {
-        let endpoint = format!("{}{}", &self.base_url(), "/api/search");
+        let endpoint = format!("{}/api/search", &self.base_url());
         let client = self.client();
 
         let response = client
@@ -136,7 +160,7 @@ impl GrafanaInstance {
         &self,
         folder_uid: &str,
     ) -> Result<Vec<SimpleDashboard>, GSError> {
-        let endpoint = format!("{}{}", &self.base_url(), "/api/search");
+        let endpoint = format!("{}/api/search", &self.base_url());
         let client = self.client();
 
         let response = client
@@ -155,11 +179,7 @@ impl GrafanaInstance {
     }
 
     pub async fn get_dashboard_full(&self, uid: &str) -> Result<FullDashboard, GSError> {
-        let endpoint = format!(
-            "{}{}",
-            &self.base_url(),
-            format!("/api/dashboards/uid/{}", uid)
-        );
+        let endpoint = format!("{}/api/dashboards/uid/{}", &self.base_url(), uid,);
         let client = self.client();
 
         debug!("Requesting full dashboard of uid: {}", uid);
@@ -172,11 +192,7 @@ impl GrafanaInstance {
 
     #[allow(dead_code)]
     pub async fn delete_dashboard(&self, uid: &str) -> Result<(), GSError> {
-        let endpoint = format!(
-            "{}{}",
-            &self.base_url(),
-            format!("/api/dashboards/uid/{}", uid)
-        );
+        let endpoint = format!("{}/api/dashboards/uid/{}", &self.base_url(), uid,);
         let client = self.client();
 
         debug!("Deleting dashboard with uid: {}", uid);
@@ -216,7 +232,7 @@ impl GrafanaInstance {
         overwrite: bool,
     ) -> Result<(), GSError> {
         let base_url = self.base_url().to_string();
-        let endpoint = format!("{}{}", base_url, "/api/dashboards/import");
+        let endpoint = format!("{}/api/dashboards/import", base_url);
 
         info!(
             "Starting replication of dashboard \"{}\" onto {}",
@@ -253,26 +269,21 @@ impl GrafanaInstance {
 
         Ok(())
     }
-}
 
-impl FullDashboard {
-    pub fn sanitize(&mut self, new_uid: Option<&str>) {
-        if let serde_json::Value::Object(ref mut map) = self.dashboard {
-            // posting the dashboard with an id results in a Bad Request
-            map.remove("id");
-            match new_uid {
-                Some(uid) => map.insert(
-                    "uid".to_string(),
-                    serde_json::Value::String(uid.to_string()),
-                ),
-                None => map.remove("uid"),
-            };
-        }
-    }
+    pub async fn get_dashboard_full_bulk(
+        &self,
+        dashboards: &[SimpleDashboard],
+    ) -> Result<Vec<(SimpleDashboard, RwLock<FullDashboard>)>, GSError> {
+        let mut full_dashboards = Vec::new();
+        for dashboard in dashboards {
+            info!(
+                "Prefetching full dashboard: {}/{}",
+                dashboard.folder_title, dashboard.title
+            );
+            let full_dashboard = self.get_dashboard_full(&dashboard.uid).await?;
 
-    pub fn change_title(&mut self, new_title: String) {
-        if let serde_json::Value::Object(ref mut map) = self.dashboard {
-            map.insert("title".to_string(), serde_json::Value::String(new_title));
+            full_dashboards.push((dashboard.clone(), RwLock::new(full_dashboard)))
         }
+        Ok(full_dashboards)
     }
 }

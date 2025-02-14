@@ -1,5 +1,6 @@
-use crate::api::dashboards::{Folder, FullDashboard, SimpleDashboard};
+use crate::api::dashboards::{Folder, FullDashboard};
 use crate::config::Config;
+use crate::dashboard_state::DashboardState;
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 use chrono::Local;
@@ -18,7 +19,7 @@ pub struct SyncService {
     config: Config,
 }
 
-// HashMap<Slave Base URL, HashMap<Folder Name, Folder>>
+// HashMap<Instance Base URL, HashMap<Folder Name, Folder>>
 pub type FolderMap = HashMap<String, HashMap<String, Folder>>;
 
 impl SyncService {
@@ -30,32 +31,27 @@ impl SyncService {
     pub async fn wait_for_next_sync(&self) {
         info!(
             "Commencing next sync at {}",
-            (Local::now() + Duration::from_mins(self.config.service.sync_rate_mins)).to_rfc2822()
+            (Local::now() + Duration::from_mins(self.config.sync_rate_mins)).to_rfc2822()
         );
-        sleep(Duration::from_mins(self.config.service.sync_rate_mins)).await;
+        sleep(Duration::from_mins(self.config.sync_rate_mins)).await;
     }
 
-    pub async fn replicate_folders_to_slaves(&self, dashboards: &[SimpleDashboard]) -> FolderMap {
-        let unique_folders = dashboards
-            .iter()
-            .map(|d| &d.folder_title)
-            .collect::<HashSet<_>>();
-
+    pub async fn replicate_folders_to_instances(&self, folders: &HashSet<String>) -> FolderMap {
         let mut created_folders: HashMap<String, HashMap<String, Folder>> = HashMap::new();
 
-        for slave in &self.config.service.instance_slaves {
-            for folder in unique_folders.iter() {
-                match slave.ensure_folder(folder).await {
+        for instance in &self.config.instances {
+            for folder in folders.iter() {
+                match instance.ensure_folder(folder).await {
                     Ok(folder) => {
                         created_folders
-                            .entry(slave.base_url().to_string())
+                            .entry(instance.base_url().to_string())
                             .or_default()
                             .insert(folder.title.clone(), folder);
                     }
                     Err(e) => {
                         error!(
                             "Couldn't sync folder for instance {}. Error: {e}",
-                            slave.base_url()
+                            instance.base_url()
                         );
                     }
                 }
@@ -65,24 +61,23 @@ impl SyncService {
         created_folders
     }
 
-    pub async fn replicate_dashboards_to_slaves(
+    pub async fn replicate_dashboards(
         &self,
-        full_dashboards: Arc<Vec<(SimpleDashboard, RwLock<FullDashboard>)>>,
+        full_dashboards: Arc<Vec<(String, RwLock<Option<FullDashboard>>)>>,
         folder_map: &FolderMap,
     ) -> Result<(), GSError> {
         let folder_map = Arc::new(folder_map.clone());
 
         let tasks: Vec<JoinHandle<Result<(), GSError>>> = self
             .config
-            .service
-            .instance_slaves
+            .instances
             .iter()
-            .map(|slave| {
+            .map(|instance| {
                 let folder_map = folder_map.clone();
                 let full_dashboards = full_dashboards.clone();
-                let slave = slave.clone();
+                let instance = instance.clone();
                 tokio::spawn(async move {
-                    Self::replicate_dashboards_to_slave(folder_map, full_dashboards, slave).await
+                    Self::replicate_dashboards_to_instance(folder_map, full_dashboards, instance).await
                 })
             })
             .collect();
@@ -99,168 +94,118 @@ impl SyncService {
         Ok(())
     }
 
-    async fn prefetch_full_dashboards_from_master(
-        &self,
-        dashboards: &[SimpleDashboard],
-    ) -> Result<Vec<(SimpleDashboard, RwLock<FullDashboard>)>, GSError> {
-        let mut full_dashboards = Vec::new();
-        for dashboard in dashboards {
-            info!(
-                "Prefetching full dashboard: {}/{}",
-                dashboard.folder_title, dashboard.title
-            );
-            let full_dashboard = self
-                .config
-                .service
-                .instance_master
-                .get_dashboard_full(&dashboard.uid)
-                .await?;
-
-            full_dashboards.push((dashboard.clone(), RwLock::new(full_dashboard)))
-        }
-        Ok(full_dashboards)
-    }
-
-    async fn replicate_dashboards_to_slave(
+    async fn replicate_dashboards_to_instance(
         folder_map: Arc<HashMap<String, HashMap<String, Folder>>>,
-        full_dashboards: Arc<Vec<(SimpleDashboard, RwLock<FullDashboard>)>>,
-        slave: GrafanaInstance,
+        full_dashboards: Arc<Vec<(String, RwLock<Option<FullDashboard>>)>>,
+        instance: GrafanaInstance,
     ) -> Result<(), GSError> {
-        for (dashboard, full_dashboard) in full_dashboards.iter() {
-            Self::replicate_dashboard_to_slave(&folder_map, &slave, dashboard, full_dashboard)
-                .await?;
+        for full_dashboard in full_dashboards.iter() {
+            Self::replicate_dashboard_to_instance(&folder_map, &instance, full_dashboard).await?;
         }
         Ok(())
     }
 
-    async fn replicate_dashboard_to_slave(
+    async fn replicate_dashboard_to_instance(
         folder_map: &Arc<HashMap<String, HashMap<String, Folder>>>,
-        slave: &GrafanaInstance,
-        dashboard: &SimpleDashboard,
-        full_dashboard: &RwLock<FullDashboard>,
+        instance: &GrafanaInstance,
+        full_dashboard: &(String, RwLock<Option<FullDashboard>>),
     ) -> Result<(), GSError> {
+        let dashboard = full_dashboard.1.read().await;
+
+        let Some(dashboard) = dashboard.as_ref() else {
+            info!("Deleting dashboard \"{}\" on instance {}", full_dashboard.0, instance.base_url());
+            // instance.delete_dashboard(&full_dashboard.0).await?;
+            return Ok(());
+        };
+
         info!(
             "Replicating dashboard \"{}/{}\" to {}",
-            dashboard.folder_title, dashboard.title, slave.base_url()
+            dashboard.meta.folder_title,
+            dashboard.dashboard.title,
+            instance.base_url()
         );
 
-        let Some(slave_folder_map) = folder_map.get(slave.base_url()) else {
-            error!("Slave {} is out of sync (Unauthorized?)", slave.base_url());
+        let Some(instance_folder_map) = folder_map.get(instance.base_url()) else {
+            error!("Instance {} is out of sync (Unauthorized?)", instance.base_url());
             return Ok(());
         };
 
-        let Some(folder) = slave_folder_map.get(&dashboard.folder_title) else {
-            error!("Slave {} is out of sync. (Unauthorized?)", slave.base_url());
+        let Some(folder) = instance_folder_map.get(&dashboard.meta.folder_title) else {
+            error!("Instance {} is out of sync. (Unauthorized?)", instance.base_url());
             return Ok(());
         };
 
-        let mut full_dashboard = full_dashboard.write().await;
-        full_dashboard.sanitize(Some(&dashboard.uid));
-        slave
-            .import_dashboard(&full_dashboard, folder, true)
+        instance
+            .import_dashboard(&dashboard, folder, true)
             .await?;
 
         Ok(())
     }
 
-    pub async fn delete_all_synctag_dashboards_from_slaves(&self, sync_tag: &str) -> Result<(), GSError> {
-        let tasks = self.config.service.instance_slaves.iter().map(|slave| {
-            let slave = slave.clone();
-            let sync_tag = sync_tag.to_string();
-            tokio::spawn(async move {
-                info!("Fetching all synced dashboards on slave {}", slave.base_url());
-                let dashboards = slave.get_dashboards_by_tag(&sync_tag).await?;
+    pub async fn remove_empty_folders_on_all_instances(&self) -> Result<(), GSError> {
+        for instance in &self.config.instances {
+            instance.remove_empty_folders().await?;
+        }
 
-                for dashboard in dashboards {
-                    info!("{dashboard:?}");
-                    info!("Deleting synced dashboard {}/{}", dashboard.folder_title, dashboard.title);
-                    slave.delete_dashboard(&dashboard.uid).await?;
-                }
-
-                Ok(())
-            })
-        }).collect::<Vec<_>>();
-
-        future::join_all(tasks)
-            .await
-            .into_iter()
-            .filter_map(|r| r.ok())
-            .next()
-            .unwrap_or(Ok(()))
+        Ok(())
     }
 
-    pub async fn delete_empty_folders_on_slaves(&self) -> Result<(), GSError> {
-        for slave in &self.config.service.instance_slaves {
-            let all_folders = slave.get_all_folders().await?;
+    pub async fn collect_all_sync_dashboards(
+        &self,
+        dashboard_state: &mut DashboardState,
+    ) -> Result<(), GSError> {
+        for instance in &self.config.instances {
+            let dashboards = instance.get_dashboards_by_tag(&self.config.sync_tag).await?;
+            let mut full_dashboards = Vec::new();
 
-            for folder in all_folders {
-                if slave.get_dashboards_in_folder(&folder.uid).await?.is_empty() {
-                    info!("Deleting empty folder {}", folder.title);
-                    slave.remove_folder(&folder.uid).await?;
-                }
+            for dashboard in dashboards {
+                let full_dashboard = instance.get_dashboard_full(&dashboard.uid).await?;
+                full_dashboards.push(full_dashboard);
             }
+
+            dashboard_state.add_set(instance.base_url().to_string(), full_dashboards);
         }
 
         Ok(())
     }
 
-    pub async fn run_sync_cycle(&self) -> Result<(), GSError> {
-        let sync_tag = self
-            .config
-            .service
-            .instance_master
-            .sync_tag()
-            .expect("Sync tag should always be set for a master instance");
+    pub async fn run_sync_cycle(&self, cycle_count: usize) -> Result<(), GSError> {
+        info!("Fetching all full dashboards with sync tag on all instances");
 
-        self.check_sync_tag_exists_on_master(sync_tag).await?;
-
-        info!("Fetching all dashboards with sync tag on {}", self.config.service.instance_master.base_url());
-        let dashboards = self
-            .config
-            .service
-            .instance_master
-            .get_dashboards_by_tag(sync_tag)
+        let mut dashboard_state = DashboardState::new();
+        self.collect_all_sync_dashboards(&mut dashboard_state)
             .await?;
 
-        debug!("Master Dashboards with synctag: {:?}", &dashboards);
+        let folder_map = self
+            .replicate_folders_to_instances(&dashboard_state.get_unique_folders())
+            .await;
 
-        info!("Prefetching all sync dashboards");
-        let full_dashboards = self
-            .prefetch_full_dashboards_from_master(&dashboards)
+        let new_dashboards = Arc::new(
+            dashboard_state
+                .get_new_dashboards(cycle_count == 0, self.config.sync_rate_mins)
+                .into_iter()
+                .map(|d| (d.0, RwLock::new(d.1)))
+                .collect::<Vec<_>>(),
+        );
+
+        self.replicate_dashboards(new_dashboards, &folder_map)
             .await?;
 
-        self.delete_all_synctag_dashboards_from_slaves(sync_tag).await?;
-
-        let folder_map = self.replicate_folders_to_slaves(&dashboards).await;
-
-        let full_dashboards = Arc::new(full_dashboards);
-        self.replicate_dashboards_to_slaves(full_dashboards, &folder_map)
-            .await?;
-
-        self.delete_empty_folders_on_slaves().await?;
+        self.remove_empty_folders_on_all_instances().await?;
 
         Ok(())
-    }
-
-    async fn check_sync_tag_exists_on_master(&self, sync_tag: &str) -> Result<(), GSError> {
-        let tags = self.config.service.instance_master.get_tags().await?;
-        debug!("Master Tags: {tags:?}");
-
-        if !tags.iter().any(|tag| tag.term == sync_tag) {
-            Err(GSError::SyncTagMissing(sync_tag.to_string()))
-        } else {
-            Ok(())
-        }
     }
 
     #[instrument]
     pub async fn run(&mut self) -> Result<(), GSError> {
+        let mut cycle_count = 0;
         loop {
-            match self.run_sync_cycle().await {
+            match self.run_sync_cycle(cycle_count).await {
                 Ok(_) => info!("Sync completed successfully"),
                 Err(e) => error!("Sync error: {e}"),
             }
             self.wait_for_next_sync().await;
+            cycle_count += 1;
         }
     }
 }
