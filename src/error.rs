@@ -13,7 +13,9 @@ pub enum GSError {
     ConfigKeyTypeWrong(String, &'static str),
     #[error(transparent)]
     RequestError(#[from] reqwest::Error),
-    #[error("The provided static header value was invalid. This is most likely a configuration error.")]
+    #[error(
+        "The provided static header value was invalid. This is most likely a configuration error."
+    )]
     InvalidHeader(#[from] InvalidHeaderValue),
     #[error(transparent)]
     JSONError(#[from] serde_json::error::Error),

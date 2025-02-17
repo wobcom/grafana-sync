@@ -77,7 +77,8 @@ impl SyncService {
                 let full_dashboards = full_dashboards.clone();
                 let instance = instance.clone();
                 tokio::spawn(async move {
-                    Self::replicate_dashboards_to_instance(folder_map, full_dashboards, instance).await
+                    Self::replicate_dashboards_to_instance(folder_map, full_dashboards, instance)
+                        .await
                 })
             })
             .collect();
@@ -113,7 +114,11 @@ impl SyncService {
         let dashboard = full_dashboard.1.read().await;
 
         let Some(dashboard) = dashboard.as_ref() else {
-            info!("Deleting dashboard \"{}\" on instance {}", full_dashboard.0, instance.base_url());
+            info!(
+                "Deleting dashboard \"{}\" on instance {}",
+                full_dashboard.0,
+                instance.base_url()
+            );
             // instance.delete_dashboard(&full_dashboard.0).await?;
             return Ok(());
         };
@@ -126,18 +131,22 @@ impl SyncService {
         );
 
         let Some(instance_folder_map) = folder_map.get(instance.base_url()) else {
-            error!("Instance {} is out of sync (Unauthorized?)", instance.base_url());
+            error!(
+                "Instance {} is out of sync (Unauthorized?)",
+                instance.base_url()
+            );
             return Ok(());
         };
 
         let Some(folder) = instance_folder_map.get(&dashboard.meta.folder_title) else {
-            error!("Instance {} is out of sync. (Unauthorized?)", instance.base_url());
+            error!(
+                "Instance {} is out of sync. (Unauthorized?)",
+                instance.base_url()
+            );
             return Ok(());
         };
 
-        instance
-            .import_dashboard(&dashboard, folder, true)
-            .await?;
+        instance.import_dashboard(dashboard, folder, true).await?;
 
         Ok(())
     }
@@ -155,7 +164,9 @@ impl SyncService {
         dashboard_state: &mut DashboardState,
     ) -> Result<(), GSError> {
         for instance in &self.config.instances {
-            let dashboards = instance.get_dashboards_by_tag(&self.config.sync_tag).await?;
+            let dashboards = instance
+                .get_dashboards_by_tag(&self.config.sync_tag)
+                .await?;
             let mut full_dashboards = Vec::new();
 
             for dashboard in dashboards {

@@ -44,8 +44,12 @@ impl DashboardState {
 
                     match other_dashboard {
                         Some(other_dashboard) => {
-                            is_synced &= other_dashboard.dashboard.panels == dashboard.dashboard.panels &&
-                                other_dashboard.dashboard.title == dashboard.dashboard.title
+                            is_synced &= other_dashboard.dashboard.panels
+                                == dashboard.dashboard.panels
+                                && other_dashboard.dashboard.title == dashboard.dashboard.title
+                                && other_dashboard.dashboard.graph_tooltip
+                                    == dashboard.dashboard.graph_tooltip
+                                && other_dashboard.dashboard.tags == dashboard.dashboard.tags;
                         }
                         None => is_synced = false,
                     };
@@ -85,37 +89,44 @@ impl DashboardState {
         destructive: bool,
         sync_interval_mins: u64,
     ) -> Option<(String, Option<FullDashboard>)> {
-        let Some(first) = dashboards.iter().filter_map(|d| d.as_ref()).next() else {
-            return None;
-        };
+        let first = dashboards.iter().filter_map(|d| d.as_ref()).next()?;
 
         let uid = first.dashboard.uid.clone();
 
-        Some((uid, dashboards
-            .iter()
-            .fold(None, |merged, d| match (merged, d.clone()) {
-                (None, d) => Some(d), // init
-                (Some(None), None) => Some(None),
-                (Some(Some(merged)), Some(d)) => {
-                    Some(Some(if d.meta.updated > merged.meta.updated {
-                        d
-                    } else {
-                        merged
-                    }))
-                }
-                (Some(None), Some(d)) | (Some(Some(d)), None) => {
-                    if destructive
-                        && (Local::now() - d.meta.updated).num_minutes() as u64> sync_interval_mins
-                    {
-                        Some(None)
-                    } else {
-                        Some(Some(d))
+        Some((
+            uid,
+            dashboards
+                .iter()
+                .fold(None, |merged, d| match (merged, d.clone()) {
+                    (None, d) => Some(d), // init
+                    (Some(None), None) => Some(None),
+                    (Some(Some(merged)), Some(d)) => {
+                        Some(Some(if d.meta.updated > merged.meta.updated {
+                            d
+                        } else {
+                            merged
+                        }))
                     }
-                }
-            }).flatten()))
+                    (Some(None), Some(d)) | (Some(Some(d)), None) => {
+                        if destructive
+                            && (Local::now() - d.meta.updated).num_minutes() as u64
+                                > sync_interval_mins
+                        {
+                            Some(None)
+                        } else {
+                            Some(Some(d))
+                        }
+                    }
+                })
+                .flatten(),
+        ))
     }
 
-    fn merge_unsynced_dashboards(&self, destructive: bool, sync_interval_mins: u64) -> Vec<(String, Option<FullDashboard>)> {
+    fn merge_unsynced_dashboards(
+        &self,
+        destructive: bool,
+        sync_interval_mins: u64,
+    ) -> Vec<(String, Option<FullDashboard>)> {
         let unsynced_set_sets = self.get_unsynced_dashboards();
 
         unsynced_set_sets
@@ -124,7 +135,11 @@ impl DashboardState {
             .collect()
     }
 
-    pub fn get_new_dashboards(&self, destructive: bool, sync_interval_mins: u64) -> Vec<(String, Option<FullDashboard>)> {
+    pub fn get_new_dashboards(
+        &self,
+        destructive: bool,
+        sync_interval_mins: u64,
+    ) -> Vec<(String, Option<FullDashboard>)> {
         self.merge_unsynced_dashboards(destructive, sync_interval_mins)
     }
 }

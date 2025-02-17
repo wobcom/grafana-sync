@@ -58,9 +58,9 @@ impl Config {
     fn read_u64_from_config(config: &Value, key: &str) -> Result<u64, GSError> {
         let value = Self::get_yaml_path(config, key)?;
 
-        Ok(value
+        value
             .as_u64()
-            .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.to_string(), "u64"))?)
+            .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.to_string(), "u64"))
     }
 
     #[instrument]
@@ -138,7 +138,10 @@ impl Config {
         for (i, instance) in self.instances.iter().enumerate() {
             debug!("  + Instance: #{i}:");
             debug!("    - URL: {}", instance.base_url());
-            debug!("    - Token: {}", instance.api_token().checkable_obfuscated());
+            debug!(
+                "    - Token: {}",
+                instance.api_token().checkable_obfuscated()
+            );
         }
     }
 }

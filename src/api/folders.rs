@@ -14,7 +14,7 @@ struct FolderBody {
 
 impl GrafanaInstance {
     pub async fn get_all_folders(&self) -> Result<Vec<Folder>, GSError> {
-        let endpoint = format!("{}{}", &self.base_url(), "/api/folders");
+        let endpoint = format!("{}/api/folders", &self.base_url());
         let client = self.client();
 
         let response = client
@@ -35,14 +35,13 @@ impl GrafanaInstance {
             .get_all_folders()
             .await?
             .into_iter()
-            .filter(|f| f.title == title)
-            .next();
+            .find(|f| f.title == title);
         if let Some(folder) = matching_folder {
             debug!("Folder {} already exists", title);
             return Ok(folder);
         }
 
-        let endpoint = format!("{}{}", &self.base_url(), "/api/folders");
+        let endpoint = format!("{}/api/folders", &self.base_url());
         let client = self.client();
 
         let folder_body = FolderBody {
@@ -66,13 +65,9 @@ impl GrafanaInstance {
 
         Ok(folder)
     }
-    
+
     pub async fn remove_folder(&self, uid: &str) -> Result<(), GSError> {
-        let endpoint = format!(
-            "{}{}",
-            &self.base_url(),
-            format!("/api/folders/{}", uid)
-        );
+        let endpoint = format!("{}/api/folders/{}", &self.base_url(), uid);
         let client = self.client();
 
         debug!("Deleting folder with uid: {}", uid);
@@ -81,7 +76,7 @@ impl GrafanaInstance {
 
         Ok(())
     }
-    
+
     pub async fn remove_empty_folders(&self) -> Result<(), GSError> {
         let all_folders = self.get_all_folders().await?;
 
@@ -91,7 +86,7 @@ impl GrafanaInstance {
                 self.remove_folder(&folder.uid).await?;
             }
         }
-        
+
         Ok(())
     }
 }

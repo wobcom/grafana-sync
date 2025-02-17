@@ -36,9 +36,7 @@ impl EncryptedCredential {
             .cipher
             .decrypt(&self.nonce, self.cred.as_slice())
             .expect("decryption failure!");
-        let string = String::from_utf8(plaintext).expect("decryption failure!");
-
-        string
+        String::from_utf8(plaintext).expect("decryption failure!")
     }
 
     #[instrument]
