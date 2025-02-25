@@ -6,15 +6,7 @@ let
 
   graphsync = pkgs.callPackage ./package.nix {};
 
-  instanceSlaveSettings = {
-    options = {
-      apiToken = mkOption {
-        type = types.str;
-      };
-    };
-  };
-
-  instanceMasterSettings = {
+  instanceSettings = {
     url = mkOption {
       type = types.str;
       description = "Grafana Base URL";
@@ -23,18 +15,17 @@ let
       type = types.str;
       description = "Grafana API Token";
     };
-    syncTag = mkOption {
-      type = types.str;
-      description = "Sync Tag for which boards to sync from the master into the slaves";
-    };
   };
 
   configSettings = {
-    instanceMaster = instanceMasterSettings;
+    syncTag = mkOption {
+      type = types.str;
+      description = "Sync Tag for which boards to sync";
+    };
 
-    instanceSlaves = mkOption {
-      type = types.attrsOf (types.submodule instanceSlaveSettings);
-      description = "Slave instances, with their base url as the key";
+    instances = mkOption {
+      type = types.attrsOf (types.submodule instanceSettings);
+      description = "instances, with their base url as the key";
     };
 
     syncRateMins = mkOption {
@@ -45,16 +36,12 @@ let
 
   configNix = {
     service = {
-      instance_master = {
-        url = cfg.configuration.instanceMaster.url;
-        api_token = cfg.configuration.instanceMaster.apiToken;
-        sync_tag = cfg.configuration.instanceMaster.syncTag;
-      };
-      instance_slaves = attrsets.mapAttrsToList
+      sync_tag = cfg.configuration.syncTag;
+      instances = attrsets.mapAttrsToList
       (name: value: {
         url = name;
         api_token = value.apiToken;
-      }) cfg.configuration.instanceSlaves;
+      }) cfg.configuration.instances;
       sync_rate_mins = cfg.configuration.syncRateMins;
     };
   };

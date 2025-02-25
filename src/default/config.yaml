@@ -1,12 +1,4 @@
-sync_tag: "MagicSync"
+sync_tag: "SyncMe"
 instances:
-  - url: "https://dashboard.lab.wobcom.de"
-    api_token: "meow1234"
-  - url: "https://localhost:4431"
-    api_token: "meow1234"
-  - url: "https://localhost:4432"
-    api_token: "meow1234"
-  - url: "https://localhost:4433"
-    api_token: "meow1234"
 
 sync_rate_mins: 1
