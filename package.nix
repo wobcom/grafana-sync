@@ -1,14 +1,11 @@
 {
-  stdenv,
+  rust-bin,
+  makeRustPlatform,
+  perl,
+  pkg-config,
+  openssl,
 }:
 
-# Needed for nightly
-with import <nixpkgs>
-{
-  overlays = [
-    (import (fetchTarball "https://github.com/oxalica/rust-overlay/archive/master.tar.gz"))
-  ];
-};
 let
   rustBin = rust-bin.nightly.latest.minimal;
 
@@ -23,9 +20,14 @@ rustPlatform.buildRustPackage rec {
 
   src = ./.;
 
-  buildInputs = [ perl pkg-config openssl ];
+  buildInputs = [
+    perl
+    pkg-config
+    openssl
+  ];
 
-  cargoHash = "sha256-95YnpkVw3QHrAPdjurqtEkXbV9on8VjDs+VnqnhaMTI=";
+  useFetchCargoVendor = true;
+  cargoHash = "sha256-DJPQmcP6i+6JoPA9vOSICTq6yXpYWVG9WPI58fVJVoc=";
 
   #installPhase = ''
   #  runHook preInstall

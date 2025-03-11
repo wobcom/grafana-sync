@@ -1,10 +1,15 @@
-{ config, pkgs, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 
 with lib;
 let
   cfg = config.services.graphsync;
 
-  graphsync = pkgs.callPackage ./package.nix {};
+  graphsync = pkgs.callPackage ./package.nix { };
 in
 {
   options = {
