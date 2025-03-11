@@ -11,6 +11,18 @@ in
     services.graphsync = {
       enable = mkEnableOption "GraphSync";
       configFile = mkOption {
+        description = ''
+          YAML formatted config file in the following format:
+          ```yaml
+          sync_tag: "SyncMe"
+          instances:
+            - url: "https://example.com"
+              api_token: "3qv5ukv8u95usiojfoj0wevrjmw0bt8w0"
+            - url: "https://example2.com"
+              api_token: "3qv5ukv8u95usiojfoj0wevrjmw0bt8w0"
+          sync_rate_mins: 1
+          ```
+        '';
         type = types.path;
       };
     };
