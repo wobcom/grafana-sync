@@ -45,11 +45,7 @@ let
       sync_rate_mins = cfg.configuration.syncRateMins;
     };
   };
-  configJSON = builtins.toFile "graphsync-config.json" (generators.toJSON {} configNix);
-  # Silly hack to get a nice yaml config file.
-  configFile = pkgs.runCommand "graphsync-config.yaml" { preferLocalBuild = true; } ''
-    ${pkgs.remarshal}/bin/json2yaml -i ${configJSON} -o $out
-  '';
+  configYAML = (generators.toYAML {} configNix);
 in
 {
   options = {
@@ -59,15 +55,26 @@ in
     };
   };
   config = lib.mkIf cfg.enable {
+    environment.etc = {
+      "graphsync.yaml" = {
+        text = configYAML;
+        mode = "0440";
+        user = "graphsync";
+      };
+    };
+
+    users.users."graphsync".isNormalUser = true;
+
     systemd.services.graphsync = {
       after = [ "network.target" ];
       wantedBy = [ "multi-user.target" ];
       description = "GraphSync Grafana Syncing Service";
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${graphsync}/bin/graphsync ${configFile}";
+        ExecStart = "${graphsync}/bin/graphsync /etc/graphsync/graphsync.yaml";
         Restart = "on-failure";
         RestartSec = 5;
+        User = "graphsync";
       };
     };
   };
