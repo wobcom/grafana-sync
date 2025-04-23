@@ -14,7 +14,7 @@ let
     rustc = rustBin;
   };
 in
-rustPlatform.buildRustPackage rec {
+rustPlatform.buildRustPackage {
   pname = "graphsync";
   version = "0.1.0";
 
