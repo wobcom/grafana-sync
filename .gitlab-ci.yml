@@ -1,0 +1,42 @@
+default:
+    tags:
+      - cerberus
+
+stages:
+  - build
+  - pages
+
+tests:
+  stage: build
+  allow_failure: true # I want to build docs either way
+  script:
+    - nix develop -c cargo test
+
+rustdoc:
+  stage: build
+  script:
+    - nix develop -c cargo doc --no-deps --locked
+  cache:
+    key: $CI_PROJECT_ID
+    paths:
+      - target/
+  artifacts:
+    paths:
+      - target/doc
+    expire_in: 1 week
+
+pages:
+  stage: pages
+  needs:
+    - rustdoc
+  script:
+    - mkdir -p public
+    - mv target/doc public/
+  artifacts:
+    paths:
+      - public
+  only:
+    - master
+
+
+
