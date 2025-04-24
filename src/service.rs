@@ -8,7 +8,6 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use log::{debug, error, info};
 use tokio::time::Instant;
-use tracing::field::debug;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
