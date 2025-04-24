@@ -1,19 +1,10 @@
 {
-  rust-bin,
-  makeRustPlatform,
+  rustPlatform,
   perl,
   pkg-config,
   openssl,
 }:
 
-let
-  rustBin = rust-bin.nightly.latest.minimal;
-
-  rustPlatform = makeRustPlatform {
-    cargo = rustBin;
-    rustc = rustBin;
-  };
-in
 rustPlatform.buildRustPackage {
   pname = "graphsync";
   version = "0.1.0";
