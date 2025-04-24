@@ -1,5 +1,3 @@
-#![feature(duration_constructors)]
-
 use crate::config::Config;
 use crate::error::GSError;
 use crate::service::SyncService;

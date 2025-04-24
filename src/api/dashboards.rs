@@ -25,10 +25,10 @@ pub struct SimpleDashboard {
     pub type_name: String,
     pub tags: Vec<String>,
     pub is_starred: bool,
-    pub folder_id: u32,
-    pub folder_uid: String,
-    pub folder_title: String,
-    pub folder_url: String,
+    pub folder_id: Option<u32>,
+    pub folder_uid: Option<String>,
+    pub folder_title: Option<String>,
+    pub folder_url: Option<String>,
     pub sort_meta: u32,
 }
 
@@ -44,10 +44,10 @@ pub struct FullDashboardMeta {
     pub created: DateTime<Local>,
     pub created_by: String,
     pub expires: DateTime<Local>,
-    pub folder_id: i64,
-    pub folder_title: String,
-    pub folder_uid: String,
-    pub folder_url: String,
+    pub folder_id: Option<i64>,
+    pub folder_title: Option<String>,
+    pub folder_uid: Option<String>,
+    pub folder_url: Option<String>,
     pub has_acl: bool,
     pub is_folder: bool,
     pub provisioned: bool,
@@ -73,7 +73,7 @@ pub struct FullDashboardData {
     pub schema_version: i32,
     pub tags: Vec<String>,
     pub templating: serde_json::Value,
-    pub time: serde_json::Value,
+    pub time: Option<serde_json::Value>,
     pub timepicker: serde_json::Value,
     pub timezone: String,
     pub title: String,
@@ -121,7 +121,7 @@ pub struct FullDashboard {
 #[serde(rename_all = "camelCase")]
 pub struct DashboardImportBody {
     pub dashboard: FullDashboardData,
-    pub folder_uid: String,
+    pub folder_uid: Option<String>,
     pub inputs: Vec<serde_json::Value>,
     pub overwrite: bool,
     // pub path: String,
@@ -228,11 +228,13 @@ impl GrafanaInstance {
     pub async fn import_dashboard(
         &self,
         dashboard: &FullDashboard,
-        folder: &Folder,
+        folder: Option<&Folder>,
         overwrite: bool,
     ) -> Result<(), GSError> {
         let base_url = self.base_url().to_string();
         let endpoint = format!("{}/api/dashboards/import", base_url);
+        let folder_uid = folder
+            .map(|f| f.uid.clone());
 
         info!(
             "Starting replication of dashboard \"{}\" onto {}",
@@ -241,7 +243,7 @@ impl GrafanaInstance {
 
         let body = DashboardImportBody {
             dashboard: dashboard.dashboard.clone(),
-            folder_uid: folder.uid.clone(),
+            folder_uid,
             inputs: vec![],
             overwrite,
             // path: "".to_string(),
@@ -278,7 +280,10 @@ impl GrafanaInstance {
         for dashboard in dashboards {
             info!(
                 "Prefetching full dashboard: {}/{}",
-                dashboard.folder_title, dashboard.title
+                dashboard.folder_title
+                    .as_deref()
+                    .unwrap_or(""), 
+                dashboard.title
             );
             let full_dashboard = self.get_dashboard_full(&dashboard.uid).await?;
 

@@ -4,219 +4,220 @@ use crate::dashboard_state::DashboardState;
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 use chrono::Local;
-use futures::future;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use log::{debug, error, info};
+use tokio::time::Instant;
+use tracing::field::debug;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
-use tokio::time::{sleep, Instant};
 use tracing::instrument;
 
-#[derive(Debug, Clone)]
-pub struct SyncService {
-    config: Config,
-}
-
-// HashMap<Instance Base URL, HashMap<Folder Name, Folder>>
+// base_url -> (folder title -> Folder)
 pub type FolderMap = HashMap<String, HashMap<String, Folder>>;
 
+/// Periodically synchronises all tagged dashboards across *all* instances.
+#[derive(Debug, Clone)]
+pub struct SyncService {
+    cfg: Arc<Config>,
+}
+
 impl SyncService {
-    #[instrument]
-    pub fn new(config: Config) -> Self {
-        Self { config }
+
+    /* Constructors */
+
+    #[instrument(skip_all)]
+    pub fn new(cfg: Config) -> Self {
+        Self { cfg: Arc::new(cfg) }
     }
 
-    pub async fn wait_for_next_sync(&self) {
-        info!(
-            "Commencing next sync at {}",
-            (Local::now() + Duration::from_mins(self.config.sync_rate_mins)).to_rfc2822()
-        );
-        sleep(Duration::from_mins(self.config.sync_rate_mins)).await;
-    }
+    /* Public API */
 
-    pub async fn replicate_folders_to_instances(&self, folders: &HashSet<String>) -> FolderMap {
-        let mut created_folders: HashMap<String, HashMap<String, Folder>> = HashMap::new();
+    /// Runs forever, every sync_cycle_interval
+    #[instrument(skip_all)]
+    pub async fn run(&self) -> Result<(), GSError> {
+        let mut tick = tokio::time::interval(Duration::from_secs(self.cfg.sync_rate_mins * 60));
+        let mut cycle = 0usize;
 
-        for instance in &self.config.instances {
-            for folder in folders.iter() {
-                match instance.ensure_folder(folder).await {
-                    Ok(folder) => {
-                        created_folders
-                            .entry(instance.base_url().to_string())
-                            .or_default()
-                            .insert(folder.title.clone(), folder);
-                    }
-                    Err(e) => {
-                        error!(
-                            "Couldn't sync folder for instance {}. Error: {e}",
-                            instance.base_url()
-                        );
-                    }
-                }
+        loop {
+            tick.tick().await;
+            
+            info!("=== sync-cycle #{cycle} ({}) ===", Local::now());
+
+            let start = Instant::now();
+            if let Err(e) = self.run_single_cycle(cycle).await {
+                error!("cycle #{cycle} failed: {e}");
             }
+            info!("=== finished sync-cycle #{cycle} in {:?}", start.elapsed());
+            cycle += 1;
         }
-
-        created_folders
     }
 
-    pub async fn replicate_dashboards(
-        &self,
-        full_dashboards: Arc<Vec<(String, RwLock<Option<FullDashboard>>)>>,
-        folder_map: &FolderMap,
-    ) -> Result<(), GSError> {
-        let folder_map = Arc::new(folder_map.clone());
+    /* Core Logic */
 
-        let tasks: Vec<JoinHandle<Result<(), GSError>>> = self
-            .config
-            .instances
-            .iter()
-            .map(|instance| {
-                let folder_map = folder_map.clone();
-                let full_dashboards = full_dashboards.clone();
-                let instance = instance.clone();
-                tokio::spawn(async move {
-                    Self::replicate_dashboards_to_instance(folder_map, full_dashboards, instance)
-                        .await
-                })
-            })
-            .collect();
+    async fn run_single_cycle(&self, cycle: usize) -> Result<(), GSError> {
+        let mut state = DashboardState::new(self.cfg.instances.len());
+        self.collect_dashboards(&mut state).await?;
 
-        debug!("Starting import task executor");
-        let start = Instant::now();
-        future::join_all(tasks)
-            .await
-            .into_iter()
-            .filter_map(|r| r.err())
-            .for_each(|r| error!("Error occurred while syncing dashboard: {r}"));
-        info!("All dashboards were synced in {:?}", start.elapsed());
+        state.print_data_stats();
 
-        Ok(())
-    }
-
-    async fn replicate_dashboards_to_instance(
-        folder_map: Arc<HashMap<String, HashMap<String, Folder>>>,
-        full_dashboards: Arc<Vec<(String, RwLock<Option<FullDashboard>>)>>,
-        instance: GrafanaInstance,
-    ) -> Result<(), GSError> {
-        for full_dashboard in full_dashboards.iter() {
-            Self::replicate_dashboard_to_instance(&folder_map, &instance, full_dashboard).await?;
-        }
-        Ok(())
-    }
-
-    async fn replicate_dashboard_to_instance(
-        folder_map: &Arc<HashMap<String, HashMap<String, Folder>>>,
-        instance: &GrafanaInstance,
-        full_dashboard: &(String, RwLock<Option<FullDashboard>>),
-    ) -> Result<(), GSError> {
-        let dashboard = full_dashboard.1.read().await;
-
-        let Some(dashboard) = dashboard.as_ref() else {
-            info!(
-                "Deleting dashboard \"{}\" on instance {}",
-                full_dashboard.0,
-                instance.base_url()
-            );
-            // instance.delete_dashboard(&full_dashboard.0).await?;
-            return Ok(());
-        };
-
-        info!(
-            "Replicating dashboard \"{}/{}\" to {}",
-            dashboard.meta.folder_title,
-            dashboard.dashboard.title,
-            instance.base_url()
-        );
-
-        let Some(instance_folder_map) = folder_map.get(instance.base_url()) else {
-            error!(
-                "Instance {} is out of sync (Unauthorized?)",
-                instance.base_url()
-            );
-            return Ok(());
-        };
-
-        let Some(folder) = instance_folder_map.get(&dashboard.meta.folder_title) else {
-            error!(
-                "Instance {} is out of sync. (Unauthorized?)",
-                instance.base_url()
-            );
-            return Ok(());
-        };
-
-        instance.import_dashboard(dashboard, folder, true).await?;
-
-        Ok(())
-    }
-
-    pub async fn remove_empty_folders_on_all_instances(&self) -> Result<(), GSError> {
-        for instance in &self.config.instances {
-            instance.remove_empty_folders().await?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn collect_all_sync_dashboards(
-        &self,
-        dashboard_state: &mut DashboardState,
-    ) -> Result<(), GSError> {
-        for instance in &self.config.instances {
-            let dashboards = instance
-                .get_dashboards_by_tag(&self.config.sync_tag)
-                .await?;
-            let mut full_dashboards = Vec::new();
-
-            for dashboard in dashboards {
-                let full_dashboard = instance.get_dashboard_full(&dashboard.uid).await?;
-                full_dashboards.push(full_dashboard);
-            }
-
-            dashboard_state.add_set(instance.base_url().to_string(), full_dashboards);
-        }
-
-        Ok(())
-    }
-
-    pub async fn run_sync_cycle(&self, cycle_count: usize) -> Result<(), GSError> {
-        info!("Fetching all full dashboards with sync tag on all instances");
-
-        let mut dashboard_state = DashboardState::new();
-        self.collect_all_sync_dashboards(&mut dashboard_state)
-            .await?;
-
-        let folder_map = self
-            .replicate_folders_to_instances(&dashboard_state.get_unique_folders())
+        let folder_map = self.
+            mirror_folders(state.unique_folders().iter().map(|&c| c.to_owned()).collect())
             .await;
 
-        let new_dashboards = Arc::new(
-            dashboard_state
-                .get_new_dashboards(cycle_count == 0, self.config.sync_rate_mins)
+        let dashboards = Arc::new(
+            state
+                .diff(cycle != 0, self.cfg.sync_rate_mins)
                 .into_iter()
-                .map(|d| (d.0, RwLock::new(d.1)))
+                .map(|(uid, d)| (uid.to_owned(), RwLock::new(d)))
                 .collect::<Vec<_>>(),
         );
 
-        self.replicate_dashboards(new_dashboards, &folder_map)
-            .await?;
+        self.replicate_dashboards(dashboards, &folder_map).await?;
 
-        self.remove_empty_folders_on_all_instances().await?;
+        self.purge_empty_folders().await
+    }
+
+    async fn collect_dashboards(
+        &self,
+        state: &mut DashboardState,
+    ) -> Result<(), GSError> {
+        let mut tasks = FuturesUnordered::new();
+
+        for instance in &self.cfg.instances {
+            let instance = instance.clone();
+            let tag = self.cfg.sync_tag.clone();
+            tasks.push(async move { fetch_full_dashboards(instance, &tag).await });
+        }
+
+        while let Some(res) = tasks.next().await {
+            let (base_url, dashboards) = res?;
+            state.add_set(base_url, dashboards);
+        }
 
         Ok(())
     }
 
-    #[instrument]
-    pub async fn run(&mut self) -> Result<(), GSError> {
-        let mut cycle_count = 0;
-        loop {
-            match self.run_sync_cycle(cycle_count).await {
-                Ok(_) => info!("Sync completed successfully"),
-                Err(e) => error!("Sync error: {e}"),
+    async fn mirror_folders(&self, folders: HashSet<String>) -> FolderMap {
+        let folders = Arc::new(folders);
+        let mut tasks = FuturesUnordered::new();
+
+        for instance in &self.cfg.instances {
+            let instance = instance.clone();
+            let folders = folders.clone();
+            tasks.push(async move { ensure_folders_on_instance(instance, &folders).await });
+        }
+
+        let mut map = FolderMap::new();
+        while let Some((url, folders)) = tasks.next().await {
+            map.insert(url, folders);
+        }
+        map
+    }
+
+    async fn replicate_dashboards(
+        &self,
+        dashboards: Arc<Vec<(String, RwLock<Option<FullDashboard>>)>>,
+        folder_map: &FolderMap,
+    ) -> Result<(), GSError> {
+        let folder_map = Arc::new(folder_map.clone());
+        let mut tasks = FuturesUnordered::new();
+
+        for instance in &self.cfg.instances {
+            let instance = instance.clone();
+            let dbs = dashboards.clone();
+            let folders = folder_map.clone();
+            tasks.push(tokio::spawn(async move {
+                replicate_dashboards_on_instance(folders, dbs, instance).await
+            }));
+        }
+
+        while let Some(res) = tasks.next().await {
+            res??;
+        }
+        Ok(())
+    }
+
+    async fn purge_empty_folders(&self) -> Result<(), GSError> {
+        for instance in &self.cfg.instances {
+            instance.remove_empty_folders().await?;
+        }
+        Ok(())
+    }
+}
+
+async fn fetch_full_dashboards(
+    instance: GrafanaInstance,
+    tag: &str
+) -> Result<(String, Vec<FullDashboard>), GSError> {
+    let mut dashboards = Vec::new();
+    for d in instance.get_dashboards_by_tag(tag).await? {
+        dashboards.push(instance.get_dashboard_full(&d.uid).await?);
+    }
+    Ok((instance.base_url().to_owned(), dashboards))
+}
+
+async fn ensure_folders_on_instance(
+    instance: GrafanaInstance,
+    folders: &HashSet<String>,
+) -> (String, HashMap<String, Folder>) {
+    let mut map = HashMap::new();
+    for name in folders {
+        if name == "General" {
+            continue;
+        }
+        match instance.ensure_folder(name).await {
+            Ok(folder) => {
+                map.insert(folder.title.clone(), folder);
             }
-            self.wait_for_next_sync().await;
-            cycle_count += 1;
+            Err(e) => error!("{}: could not create folder '{name}': {e}", instance.base_url()),
         }
     }
+    (instance.base_url().to_owned(), map)
+}
+
+async fn replicate_dashboards_on_instance(
+    folder_map: Arc<FolderMap>,
+    dashboards: Arc<Vec<(String, RwLock<Option<FullDashboard>>)>>,
+    inst: GrafanaInstance,
+) -> Result<(), GSError> {
+    let folders = match folder_map.get(inst.base_url()) {
+        Some(f) => f,
+        None => {
+            error!("{}: folder map missing (unauthorised?)", inst.base_url());
+            return Ok(());
+        }
+    };
+
+    let mut jobs = FuturesUnordered::new();
+
+    for (uid, guard) in dashboards.iter() {
+        let inst = inst.clone();
+        let folders = folders.clone();
+        jobs.push(async move {
+            let maybe_dashboard = guard.read().await;
+            match &*maybe_dashboard {
+                Some(d) => {
+                    let title = d.meta.folder_title
+                        .as_deref()
+                        .unwrap_or("");
+                    let folder = folders.get(title);
+                    inst.import_dashboard(d, folder, true).await?;
+                }
+                None => {
+                    debug!("{}: deleting dashboard '{uid}'", inst.base_url());
+                    // TODO: Only truly delete once I deem this stable
+                    // inst.delete_dashboard(uid).await?;
+                }
+            }
+            Ok::<_, GSError>(())
+        });
+    }
+
+    while let Some(res) = jobs.next().await {
+        res?; // bubble up any API error
+    }
+    Ok(())
 }
