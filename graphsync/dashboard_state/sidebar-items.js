@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["dashboards_equal","index_by_uid","merge_dashboards"],"struct":["DashboardState"],"type":["Dashboards","SetName"]};

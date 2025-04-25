@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["AnnotationsDashboardMeta","AnnotationsOrganizationMeta","AnnotationsPermissions","DashboardImportBody","Folder","FullDashboard","FullDashboardData","FullDashboardMeta","SimpleDashboard","Tag"]};
