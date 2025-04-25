@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  release:
+    types: [ created ]
+
+jobs:
+  release-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+        arch:
+          - x86_64
+          - arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          rust-version: stable
+          targets: ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Archive binary
+        run: |
+          BIN=graphsync
+          TAR=graphsync-${{ github.event.release.tag_name }}-${{ matrix.arch }}.tar.gz
+          mkdir out
+          cp target/${{ matrix.target }}/release/$BIN out/
+          tar czf $TAR -C out $BIN
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          name: graphsync-${{ matrix.arch }}.tar.gz
+          asset_path: graphsync-${{ github.event.release.tag_name }}-${{ matrix.arch }}.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fallback-${{ matrix.arch }}
+          path: graphsync-${{ github.event.release.tag_name }}-${{ matrix.arch }}.tar.gz
