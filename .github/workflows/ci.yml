@@ -20,11 +20,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build Docs
-        run: cargo doc --no-deps --locked
+        run: cargo doc --no-deps
+      
+      - name: Add redirect
+        run: echo '<meta http-equiv="refresh" content="0;url=graphsync/index.html">' > target/doc/index.html
+
+      - name: Remove lock file
+        run: rm target/doc/.lock
 
       - name: Upload docs artifact
         uses: actions/upload-artifact@v4
