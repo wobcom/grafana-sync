@@ -6,7 +6,7 @@
 }:
 
 rustPlatform.buildRustPackage {
-  pname = "graphsync";
+  pname = "grafana-sync";
   version = "0.1.0";
 
   src = ./.;
@@ -23,7 +23,7 @@ rustPlatform.buildRustPackage {
   #installPhase = ''
   #  runHook preInstall
   #  mkdir -p $out/bin
-  #  mv target/release/graphsync $out/bin
+  #  mv target/release/grafana-sync $out/bin
   #  runHook postInstall
   #'';
 }

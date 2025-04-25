@@ -7,14 +7,14 @@
 
 with lib;
 let
-  cfg = config.services.graphsync;
+  cfg = config.services.grafana-sync;
 
-  graphsync = pkgs.callPackage ./package.nix { };
+  grafana-sync = pkgs.callPackage ./package.nix { };
 in
 {
   options = {
-    services.graphsync = {
-      enable = mkEnableOption "GraphSync";
+    services.grafana-sync = {
+      enable = mkEnableOption "Grafana Sync";
       configFile = mkOption {
         description = ''
           YAML formatted config file in the following format:
@@ -33,18 +33,18 @@ in
     };
   };
   config = {
-    users.users."graphsync".isNormalUser = true;
+    users.users."grafana-sync".isNormalUser = true;
 
-    systemd.services.graphsync = {
+    systemd.services.grafana-sync = {
       after = [ "network.target" ];
       wantedBy = [ "multi-user.target" ];
-      description = "GraphSync Grafana Syncing Service";
+      description = "Grafana Syncing Service";
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${graphsync}/bin/graphsync ${cfg.configFile}";
+        ExecStart = "${grafana-sync}/bin/grafana-sync ${cfg.configFile}";
         Restart = "on-failure";
         RestartSec = 5;
-        User = "graphsync";
+        User = "grafana-sync";
       };
     };
   };
