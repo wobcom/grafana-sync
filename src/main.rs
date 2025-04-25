@@ -16,7 +16,7 @@ mod service;
 #[tokio::main]
 async fn main() {
     match run().await {
-        Err(e) => error!("GraphSync exited with error: {}", e),
+        Err(e) => error!("Grafana Sync exited with error: {}", e),
         _ => info!("Exiting."),
     }
 }

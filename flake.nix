@@ -1,5 +1,5 @@
 {
-  description = "graphsync flake";
+  description = "grafana-sync flake";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
