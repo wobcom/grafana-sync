@@ -2,6 +2,10 @@
 name = "grafana-sync"
 version = "0.1.0"
 edition = "2021"
+description = "Dashboard synchronization tool for grafana"
+license = "MIT"
+homepage = "https://github.com/wobcom/grafana-sync"
+repository = "https://github.com/wobcom/grafana-sync"
 
 [dependencies]
 serde_json = "1.0.138"
