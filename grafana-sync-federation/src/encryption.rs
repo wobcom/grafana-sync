@@ -107,8 +107,6 @@ where
 
         self.encrypt_frame(&mut data, dst)?;
 
-        dst.extend_from_slice(&data);
-
         Ok(())
     }
 }
