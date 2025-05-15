@@ -1,4 +1,3 @@
-use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 use chrono::{DateTime, Local};
 use log::{debug, info, warn};
@@ -130,7 +129,7 @@ pub struct DashboardImportBody {
 
 #[allow(dead_code)]
 impl GrafanaInstance {
-    pub async fn get_tags(&self) -> Result<Vec<Tag>, GSError> {
+    pub async fn get_tags(&self) -> crate::Result<Vec<Tag>> {
         let endpoint = format!("{}/api/dashboards/tags", &self.base_url());
         let client = self.client();
 
@@ -140,7 +139,7 @@ impl GrafanaInstance {
         Ok(serde_json::from_str::<Vec<Tag>>(&text)?)
     }
 
-    pub async fn get_dashboards_by_tag(&self, tag: &str) -> Result<Vec<SimpleDashboard>, GSError> {
+    pub async fn get_dashboards_by_tag(&self, tag: &str) -> crate::Result<Vec<SimpleDashboard>> {
         let endpoint = format!("{}/api/search", &self.base_url());
         let client = self.client();
 
@@ -159,7 +158,7 @@ impl GrafanaInstance {
     pub async fn get_dashboards_in_folder(
         &self,
         folder_uid: &str,
-    ) -> Result<Vec<SimpleDashboard>, GSError> {
+    ) -> crate::Result<Vec<SimpleDashboard>> {
         let endpoint = format!("{}/api/search", &self.base_url());
         let client = self.client();
 
@@ -178,7 +177,7 @@ impl GrafanaInstance {
         Ok(serde_json::from_str::<Vec<SimpleDashboard>>(&text)?)
     }
 
-    pub async fn get_dashboard_full(&self, uid: &str) -> Result<FullDashboard, GSError> {
+    pub async fn get_dashboard_full(&self, uid: &str) -> crate::Result<FullDashboard> {
         let endpoint = format!("{}/api/dashboards/uid/{}", &self.base_url(), uid,);
         let client = self.client();
 
@@ -191,7 +190,7 @@ impl GrafanaInstance {
     }
 
     #[allow(dead_code)]
-    pub async fn delete_dashboard(&self, uid: &str) -> Result<(), GSError> {
+    pub async fn delete_dashboard(&self, uid: &str) -> crate::Result<()> {
         let endpoint = format!("{}/api/dashboards/uid/{}", &self.base_url(), uid,);
         let client = self.client();
 
@@ -207,7 +206,7 @@ impl GrafanaInstance {
         &self,
         folder_uid: &str,
         dashboard_name: &str,
-    ) -> Result<(), GSError> {
+    ) -> crate::Result<()> {
         let mut dashboards = self.get_dashboards_in_folder(folder_uid).await?;
 
         dashboards.retain(|d| d.title == dashboard_name);
@@ -230,7 +229,7 @@ impl GrafanaInstance {
         dashboard: &FullDashboard,
         folder: Option<&Folder>,
         overwrite: bool,
-    ) -> Result<(), GSError> {
+    ) -> crate::Result<()> {
         let base_url = self.base_url().to_string();
         let endpoint = format!("{}/api/dashboards/import", base_url);
         let folder_uid = folder
@@ -275,7 +274,7 @@ impl GrafanaInstance {
     pub async fn get_dashboard_full_bulk(
         &self,
         dashboards: &[SimpleDashboard],
-    ) -> Result<Vec<(SimpleDashboard, RwLock<FullDashboard>)>, GSError> {
+    ) -> crate::Result<Vec<(SimpleDashboard, RwLock<FullDashboard>)>> {
         let mut full_dashboards = Vec::new();
         for dashboard in dashboards {
             info!(

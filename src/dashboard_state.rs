@@ -1,5 +1,5 @@
 use crate::api::dashboards::FullDashboard;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Duration, Local, TimeDelta};
 use log::{debug, info, warn};
 use std::collections::{HashMap, HashSet};
 
@@ -32,14 +32,14 @@ impl DashboardState {
     pub fn diff(
         &self,
         destructive: bool,
-        sync_interval_mins: u64,
+        sync_interval: &Duration,
     ) -> Vec<(&str, Option<FullDashboard>)> {
         let by_uid = index_by_uid(&self.sets);
 
         by_uid
             .into_iter()
             .filter_map(|(uid, dashboards)| {
-                merge_dashboards(uid, &dashboards, destructive, sync_interval_mins, self.instance_count)
+                merge_dashboards(uid, &dashboards, destructive, sync_interval, self.instance_count)
             })
             .collect()
     }
@@ -75,7 +75,7 @@ fn merge_dashboards<'a>(
     uid: &'a str,
     dashboards: &[&FullDashboard],
     destructive: bool,
-    sync_interval_mins: u64,
+    sync_interval: &Duration,
     instance_count: usize,
 ) -> Option<(&'a str, Option<FullDashboard>)> {
     debug!("{uid}: {:?}", dashboards.iter().map(|d| &d.dashboard.title).collect::<Vec<_>>());
@@ -98,8 +98,8 @@ fn merge_dashboards<'a>(
 
     // Delete if matching criteria to determine it was deleted
     let now: DateTime<Local> = Local::now();
-    let age_mins: u64        = (now - newest.meta.updated).num_minutes() as u64;
-    let delete_outdated      = destructive && age_mins > sync_interval_mins * 2;
+    let age_mins: TimeDelta  = now - newest.meta.updated;
+    let delete_outdated      = destructive && &age_mins > sync_interval;
 
     let result = if delete_outdated {
         warn!("Dashboard {} will be deleted", newest.dashboard.title);

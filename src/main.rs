@@ -1,17 +1,18 @@
 use crate::config::Config;
-use crate::error::GSError;
 use crate::service::SyncService;
 use log::{error, info, LevelFilter};
 use std::env;
 use tracing::instrument;
 
 pub mod api;
+pub mod error;
 mod config;
 mod dashboard_state;
-mod encrypted_cred;
-mod error;
 mod instance;
 mod service;
+mod federation;
+
+pub use error::*;
 
 #[tokio::main]
 async fn main() {
@@ -22,7 +23,7 @@ async fn main() {
 }
 
 #[instrument]
-async fn run() -> Result<(), GSError> {
+async fn run() -> crate::Result<()> {
     env_logger::builder()
         .filter_level(LevelFilter::Info)
         .format_target(false)
@@ -30,9 +31,9 @@ async fn run() -> Result<(), GSError> {
         .init();
 
     let args: Vec<String> = env::args().collect();
-    let config_path = args.get(1).map(|str| str.as_str()).unwrap_or("config.yaml");
+    let config_path = args.get(1).map(|s| s.as_str());
 
-    let config = Config::use_config_file(config_path)?;
+    let config = Config::fetch(config_path)?;
 
     config.dbg_print();
 

@@ -1,147 +1,138 @@
-use crate::error::GSError;
-use crate::instance::GrafanaInstance;
-use log::{debug, info, warn};
-use serde_yaml::Value;
-use std::fs::File;
-use std::io::Write;
-use std::path::Path;
-use std::{fs, io};
-use tracing::instrument;
+use std::path::PathBuf;
 
-#[derive(Debug, Clone)]
-pub struct Config {
+use crate::instance::GrafanaInstance;
+use crate::Error;
+use chrono::Duration;
+use grafana_sync_federation::FederationPeer;
+use log::debug;
+use serde::Deserialize;
+use serde_with::serde_as;
+use serde_with::DurationSeconds;
+use serde_with::OneOrMany;
+use serde_with::formats::PreferMany;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("Strict key mode is enabled but there are peers with unconfigured identity keys")]
+    StrictKeyConfigIncomplete,
+    #[error("Strict key mode is enabled but the local private key is not configured")]
+    StrictKeyConfigLocalIncomplete,
+    #[error("The file to a configured public key is missing")]
+    PublicKeyFileMissing,
+    #[error("The file to the local configured private key is missing")]
+    PrivateKeyFileMissing,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FederationConfig {
+    pub local_uid: String,
+    pub instances: Vec<FederationPeer>,
+    #[serde(default)]
+    pub strict_key_mode: bool,
+    pub local_private_key_file: Option<PathBuf>,
+}
+
+impl FederationConfig {
+    pub fn local(&self) -> Option<&FederationPeer> {
+        self.instances.iter().find(|i| i.uid == self.local_uid)
+    }
+
+    pub fn iter_peers(&self) -> impl Iterator<Item = &FederationPeer> {
+        self.instances.iter().filter(|p| p.uid != self.local_uid)
+    }
+
+    pub fn check(&self) -> Result<(), ConfigError> {
+        if let Some(key_path) = &self.local_private_key_file {
+            if !key_path.exists() {
+                return Err(ConfigError::PrivateKeyFileMissing);
+            }
+        } else if self.strict_key_mode {
+            return Err(ConfigError::StrictKeyConfigLocalIncomplete);
+        }
+
+        for peer in self.iter_peers() {
+            let Some(key_path) = &peer.public_key_file else {
+                if self.strict_key_mode {
+                    return Err(ConfigError::StrictKeyConfigIncomplete);
+                }
+                continue;
+            };
+            if !key_path.exists() {
+                return Err(ConfigError::PublicKeyFileMissing);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GrafanaConfig {
     pub instances: Vec<GrafanaInstance>,
-    pub sync_tag: String,
-    pub sync_rate_mins: u64,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize)]
+pub struct Config {
+    #[serde_as(as = "OneOrMany<_, PreferMany>")]
+    pub sync_tags: Vec<String>,
+    #[serde_as(as = "DurationSeconds<i64>")]
+    sync_rate_secs: Duration,
+    pub federation: Option<FederationConfig>,
+    pub grafana: GrafanaConfig,
 }
 
 impl Config {
-    fn get_or_create<P: AsRef<Path>>(path: P) -> io::Result<File> {
-        if !fs::exists(&path)? {
-            info!(
-                "No config file exists yet. Creating one at {}",
-                path.as_ref().display()
-            );
+    pub fn fetch(path: Option<&str>) -> crate::Result<Config> {
+        let config: Config = config::Config::builder()
+            .add_source(config::File::with_name(path.unwrap_or("config")))
+            .build()?
+            .try_deserialize()?;
 
-            let mut file = File::create_new(&path)?;
-
-            file.write_all(include_bytes!("default/config.yaml"))?;
+        if config.sync_rate_secs.num_seconds() <= 0 {
+            return Err(Error::SyncIntervalOutOfRange);
         }
 
-        File::open(&path)
-    }
-
-    fn get_yaml_path<'a>(config: &'a Value, full_key: &str) -> Result<&'a Value, GSError> {
-        let keys = full_key.split('.');
-        let mut value = config;
-
-        for key in keys {
-            value = value
-                .get(key)
-                .ok_or_else(|| GSError::ConfigKeyMissing(full_key.to_string()))?;
-        }
-
-        Ok(value)
-    }
-
-    #[instrument]
-    fn read_string_from_config(config: &Value, key: &str) -> Result<String, GSError> {
-        let value = Self::get_yaml_path(config, key)?;
-
-        Ok(value
-            .as_str()
-            .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.to_string(), "String"))?
-            .to_string())
-    }
-
-    #[instrument]
-    fn read_u64_from_config(config: &Value, key: &str) -> Result<u64, GSError> {
-        let value = Self::get_yaml_path(config, key)?;
-
-        value
-            .as_u64()
-            .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.to_string(), "u64"))
-    }
-
-    #[instrument]
-    fn collect_instances(config: &Value) -> Result<Vec<GrafanaInstance>, GSError> {
-        let mut instances = Vec::new();
-
-        let cfg_instances = Self::get_yaml_path(config, "instances");
-
-        let json_instances = match cfg_instances {
-            Err(_) => {
-                warn!("No instances are defined.");
-                return Ok(instances);
-            }
-            Ok(instances) => instances,
-        };
-
-        let json_instances = json_instances
-            .as_sequence()
-            .ok_or(GSError::ConfigKeyTypeWrong(
-                "instances".to_string(),
-                "Sequence",
-            ))?;
-
-        for (i, instance) in json_instances.iter().enumerate() {
-            let key = format!("instances[{}].url", i);
-            let url = instance
-                .get("url")
-                .ok_or_else(|| GSError::ConfigKeyMissing(key.clone()))?
-                .as_str()
-                .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.clone(), "String"))?
-                .to_string();
-
-            let key = format!("instances[{}].api_token", i);
-            let api_token = instance
-                .get("api_token")
-                .ok_or_else(|| GSError::ConfigKeyMissing(key.clone()))?
-                .as_str()
-                .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.clone(), "String"))?
-                .to_string()
-                .into();
-
-            instances.push(GrafanaInstance::new(url, api_token)?);
-        }
-
-        info!("Loaded {} instance(s):", json_instances.len());
-        for instance in &instances {
-            info!("  - {}", instance.base_url());
-        }
-
-        Ok(instances)
-    }
-
-    pub fn use_config_file<P: AsRef<Path>>(path: P) -> Result<Config, GSError> {
-        let file = Self::get_or_create(&path)?;
-
-        let config = serde_yaml::from_reader::<_, Value>(file)?;
-
-        let sync_tag = Self::read_string_from_config(&config, "sync_tag")?;
-        let sync_rate_mins = Self::read_u64_from_config(&config, "sync_rate_mins")?;
-
-        let instances = Self::collect_instances(&config)?;
-
-        Ok(Config {
-            sync_tag,
-            instances,
-            sync_rate_mins,
-        })
+        Ok(config)
     }
 
     pub(crate) fn dbg_print(&self) {
         debug!("Full configuration:");
 
-        debug!("  + Sync Tag: {}", self.sync_tag);
-        debug!("  + Sync Rate: {}", self.sync_rate_mins);
-        for (i, instance) in self.instances.iter().enumerate() {
-            debug!("  + Instance: #{i}:");
-            debug!("    - URL: {}", instance.base_url());
-            debug!(
-                "    - Token: {}",
-                instance.api_token().checkable_obfuscated()
-            );
+        debug!("  + Sync Tags: {:?}",   self.sync_tags);
+        debug!("  + Sync Rate: {}s", self.sync_rate_secs);
+
+        debug!("");
+
+        for (i, instance) in self.grafana.instances.iter().enumerate() {
+            debug!("  + Grafana Instance: #{i}:");
+            debug!("    - URL: {}",   instance.base_url());
         }
+
+        debug!("");
+
+        if let Some(federation) = &self.federation {
+            if federation.strict_key_mode {
+                debug!("  + !! Strict Key Mode activated !!")
+            }
+            debug!("  + Local Federation ID: {}", federation.local_uid);
+            if let Some(key) = &federation.local_private_key_file {
+                debug!("  + Local Federation Private Key File: {}", key.display());
+            }
+
+            for (i, peer) in federation.iter_peers().enumerate() {
+                debug!("  + Federation Peer: #{i}:");
+                debug!("    - UID: {}",     peer.uid);
+                debug!("    - Address: {}", peer.address);
+                debug!("    - Port: {}",    peer.port);
+                if let Some(key) = &peer.public_key_file {
+                    debug!("    - Public Key File: {}", key.display());
+                }
+            }
+        }
+    }
+
+    pub fn sync_rate(&self) -> &Duration {
+        &self.sync_rate_secs
     }
 }

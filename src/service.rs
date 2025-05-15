@@ -1,16 +1,16 @@
 use crate::api::dashboards::{Folder, FullDashboard};
 use crate::config::Config;
 use crate::dashboard_state::DashboardState;
-use crate::error::GSError;
+use crate::federation::SyncMessage;
 use crate::instance::GrafanaInstance;
 use chrono::Local;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use log::{debug, error, info};
+use grafana_sync_federation::{FederatedNetwork, FederatedNetworkBuilder};
+use log::{debug, error, info, warn};
 use tokio::time::Instant;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::instrument;
 
@@ -36,8 +36,43 @@ impl SyncService {
 
     /// Runs forever, every sync_cycle_interval
     #[instrument(skip_all)]
-    pub async fn run(&self) -> Result<(), GSError> {
-        let mut tick = tokio::time::interval(Duration::from_secs(self.cfg.sync_rate_mins * 60));
+    pub async fn run(&self) -> crate::Result<()> {
+        match &self.cfg.federation {
+            Some(_) => self.run_federated().await,
+            None => self.run_solo().await,
+        }
+    }
+
+    /* Core Logic */
+
+    pub async fn run_federated(&self) -> crate::Result<()> {
+        let federation_cfg = self.cfg.federation.as_ref().unwrap();
+        federation_cfg.check()?;
+
+        if federation_cfg.strict_key_mode {
+            warn!("Federation will run in strict key mode and every peer will have to authenticate with a static identity key additionally to the passphrase.");
+        }
+        
+        let local = federation_cfg.local()
+            .ok_or(crate::Error::LocalNotInPeerList)?
+            .clone();
+
+        let peers = federation_cfg.iter_peers()
+            .cloned()
+            .collect();
+
+        let network: Arc<FederatedNetwork<SyncMessage>> = FederatedNetworkBuilder::new(local, peers)
+            .with_local_key_path(federation_cfg.local_private_key_file.clone())
+            .init()
+            .await?;
+
+        network.run_tasks().await?;
+
+        Ok(())
+    }
+
+    pub async fn run_solo(&self) -> crate::Result<()> {
+        let mut tick = tokio::time::interval(self.cfg.sync_rate().to_std()?);
         let mut cycle = 0usize;
 
         loop {
@@ -54,10 +89,8 @@ impl SyncService {
         }
     }
 
-    /* Core Logic */
-
-    async fn run_single_cycle(&self, cycle: usize) -> Result<(), GSError> {
-        let mut state = DashboardState::new(self.cfg.instances.len());
+    async fn run_single_cycle(&self, cycle: usize) -> crate::Result<()> {
+        let mut state = DashboardState::new(self.cfg.grafana.instances.len());
         self.collect_dashboards(&mut state).await?;
 
         state.print_data_stats();
@@ -68,7 +101,7 @@ impl SyncService {
 
         let dashboards = Arc::new(
             state
-                .diff(cycle != 0, self.cfg.sync_rate_mins)
+                .diff(cycle != 0, self.cfg.sync_rate())
                 .into_iter()
                 .map(|(uid, d)| (uid.to_owned(), RwLock::new(d)))
                 .collect::<Vec<_>>(),
@@ -82,13 +115,14 @@ impl SyncService {
     async fn collect_dashboards(
         &self,
         state: &mut DashboardState,
-    ) -> Result<(), GSError> {
+    ) -> crate::Result<()> {
         let mut tasks = FuturesUnordered::new();
 
-        for instance in &self.cfg.instances {
-            let instance = instance.clone();
-            let tag = self.cfg.sync_tag.clone();
-            tasks.push(async move { fetch_full_dashboards(instance, &tag).await });
+        for instance in &self.cfg.grafana.instances {
+            self.cfg.sync_tags.iter().cloned().for_each(|tag| {
+                let instance = instance.clone();
+                tasks.push(async move { fetch_full_dashboards(instance, &tag).await });
+            });
         }
 
         while let Some(res) = tasks.next().await {
@@ -103,7 +137,7 @@ impl SyncService {
         let folders = Arc::new(folders);
         let mut tasks = FuturesUnordered::new();
 
-        for instance in &self.cfg.instances {
+        for instance in &self.cfg.grafana.instances {
             let instance = instance.clone();
             let folders = folders.clone();
             tasks.push(async move { ensure_folders_on_instance(instance, &folders).await });
@@ -120,11 +154,11 @@ impl SyncService {
         &self,
         dashboards: Arc<Vec<(String, RwLock<Option<FullDashboard>>)>>,
         folder_map: &FolderMap,
-    ) -> Result<(), GSError> {
+    ) -> crate::Result<()> {
         let folder_map = Arc::new(folder_map.clone());
         let mut tasks = FuturesUnordered::new();
 
-        for instance in &self.cfg.instances {
+        for instance in &self.cfg.grafana.instances {
             let instance = instance.clone();
             let dbs = dashboards.clone();
             let folders = folder_map.clone();
@@ -139,8 +173,8 @@ impl SyncService {
         Ok(())
     }
 
-    async fn purge_empty_folders(&self) -> Result<(), GSError> {
-        for instance in &self.cfg.instances {
+    async fn purge_empty_folders(&self) -> crate::Result<()> {
+        for instance in &self.cfg.grafana.instances {
             instance.remove_empty_folders().await?;
         }
         Ok(())
@@ -150,7 +184,7 @@ impl SyncService {
 async fn fetch_full_dashboards(
     instance: GrafanaInstance,
     tag: &str
-) -> Result<(String, Vec<FullDashboard>), GSError> {
+) -> crate::Result<(String, Vec<FullDashboard>)> {
     let mut dashboards = Vec::new();
     for d in instance.get_dashboards_by_tag(tag).await? {
         dashboards.push(instance.get_dashboard_full(&d.uid).await?);
@@ -181,7 +215,7 @@ async fn replicate_dashboards_on_instance(
     folder_map: Arc<FolderMap>,
     dashboards: Arc<Vec<(String, RwLock<Option<FullDashboard>>)>>,
     inst: GrafanaInstance,
-) -> Result<(), GSError> {
+) -> crate::Result<()> {
     let folders = match folder_map.get(inst.base_url()) {
         Some(f) => f,
         None => {
@@ -211,7 +245,7 @@ async fn replicate_dashboards_on_instance(
                     // inst.delete_dashboard(uid).await?;
                 }
             }
-            Ok::<_, GSError>(())
+            Ok::<_, crate::Error>(())
         });
     }
 

@@ -33,7 +33,11 @@ in
     };
   };
   config = {
-    users.users."grafana-sync".isNormalUser = true;
+    users.users."grafana-sync" = {
+      isSystemUser = true;
+      group = "grafana-sync";
+    };
+    useres.groups."grafana-sync" = {};
 
     systemd.services.grafana-sync = {
       after = [ "network.target" ];

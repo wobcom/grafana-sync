@@ -1,5 +1,4 @@
 use crate::api::dashboards::Folder;
-use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 use log::{debug, info};
 use serde::Serialize;
@@ -13,7 +12,7 @@ struct FolderBody {
 }
 
 impl GrafanaInstance {
-    pub async fn get_all_folders(&self) -> Result<Vec<Folder>, GSError> {
+    pub async fn get_all_folders(&self) -> crate::Result<Vec<Folder>> {
         let endpoint = format!("{}/api/folders", &self.base_url());
         let client = self.client();
 
@@ -29,7 +28,7 @@ impl GrafanaInstance {
     }
 
     // returns the folder uid on the instance
-    pub async fn ensure_folder(&self, title: &str) -> Result<Folder, GSError> {
+    pub async fn ensure_folder(&self, title: &str) -> crate::Result<Folder> {
         debug!("Ensuring folder {} exists on {}...", title, self.base_url());
         let matching_folder = self
             .get_all_folders()
@@ -66,7 +65,7 @@ impl GrafanaInstance {
         Ok(folder)
     }
 
-    pub async fn remove_folder(&self, uid: &str) -> Result<(), GSError> {
+    pub async fn remove_folder(&self, uid: &str) -> crate::Result<()> {
         let endpoint = format!("{}/api/folders/{}", &self.base_url(), uid);
         let client = self.client();
 
@@ -77,7 +76,7 @@ impl GrafanaInstance {
         Ok(())
     }
 
-    pub async fn remove_empty_folders(&self) -> Result<(), GSError> {
+    pub async fn remove_empty_folders(&self) -> crate::Result<()> {
         let all_folders = self.get_all_folders().await?;
 
         for folder in all_folders {
