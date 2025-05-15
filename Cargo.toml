@@ -1,7 +1,8 @@
 [package]
 name = "grafana-sync"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+authors = [ "willow" ]
 description = "Dashboard synchronization tool for grafana"
 license = "MIT"
 homepage = "https://github.com/wobcom/grafana-sync"
