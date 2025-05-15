@@ -6,14 +6,14 @@ use chacha20poly1305::{aead::OsRng, Key, KeyInit, XChaCha20Poly1305};
 use dashmap::DashMap;
 use ed25519_dalek::{pkcs8::DecodePrivateKey, SigningKey, VerifyingKey};
 use hkdf::Hkdf;
-use log::{debug, error, info};
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tokio::net::TcpStream;
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use x25519_dalek::{PublicKey, StaticSecret};
 use serde_big_array::BigArray;
-use zeroize::ZeroizeOnDrop;
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use crate::{Error, FederationPeer, PeerConnection, PeerMessage, PingPong, VERSION};
 
@@ -114,10 +114,10 @@ impl PingPong for InitMsgType {
 
 impl InitMsgType {
     // returns the hello message and the used session-bound ephemeral secret key
-    fn produce_hello<M>(auth: &AuthOrchestrator<M>) -> crate::Result<(StaticSecret, PeerMessage<InitMsgType>)> {
+    fn produce_hello<M>(auth: &AuthOrchestrator<M>) -> crate::Result<(Zeroizing<StaticSecret>, PeerMessage<InitMsgType>)> {
         let ident_pub = auth.ident_pub()?;
-        let eph_key = StaticSecret::random_from_rng(OsRng);
-        let eph_pub = x25519_dalek::PublicKey::from(&eph_key); // just saying: won't zeroize
+        let eph_key = Zeroizing::new(StaticSecret::random_from_rng(OsRng));
+        let eph_pub = x25519_dalek::PublicKey::from(&*eph_key); // just saying: won't zeroize
         let hello = InitMsgType::Hello {
             version: VERSION,
             uid: auth.local_uid().to_string(),
@@ -162,7 +162,7 @@ impl<M> AuthOrchestrator<M> {
         let peer_psk = self.peer_psk(&uid)
             .ok_or(Error::PeerTokenNotFound)?;
 
-        let hk = Hkdf::<Sha256>::new(Some(peer_psk.as_bytes()), shared_secret.as_bytes());
+        let hk = Hkdf::<Sha256>::new(None, &[shared_secret.as_bytes(), peer_psk.as_bytes()].concat());
         let mut session_key = [0u8; 32];
         hk.expand(b"meow session key :3", &mut session_key)
             .map_err(|_| Error::HkdfInvalidLength)?;
