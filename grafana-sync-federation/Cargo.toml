@@ -27,3 +27,4 @@ zeroize = { version = "1.8.1", features = ["serde"] }
 hkdf = "0.12.4"
 sha2 = "0.10.9"
 dashmap = "6.1.0"
+integer-encoding = "4.0.2"

@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use chacha20poly1305::{aead::Nonce, AeadInPlace, XChaCha20Poly1305};
+use integer_encoding::VarInt;
 use log::{trace, warn};
 use tokio_util::{bytes::{Buf, BufMut, BytesMut}, codec::{Decoder, Encoder}};
 
@@ -22,22 +23,32 @@ const MAX_FRAME_LEN: usize = 64 * 1024; // 64KiB should be fine for now.
 
 impl<M> EncryptionCodec<M> {
     pub fn encrypt_frame(&mut self, data: &mut Vec<u8>, dst: &mut BytesMut) -> Result<(), FrameError> {
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        let nonce_bytes_raw = self.nonce.to_be_bytes();
-        nonce_bytes[(NONCE_LEN - size_of_val(&nonce_bytes_raw))..].copy_from_slice(&nonce_bytes_raw);
+        let nonce_num = self.nonce;
         self.nonce = self.nonce.wrapping_add(1);
+
+        let mut nonce_bytes = [0u8; NONCE_LEN];
+        let nonce_bytes_raw = nonce_num.to_be_bytes();
+        nonce_bytes[(NONCE_LEN - size_of_val(&nonce_bytes_raw))..].copy_from_slice(&nonce_bytes_raw);
         let nonce = NonceType::from_slice(&nonce_bytes);
 
         self.cipher.encrypt_in_place(nonce, b"", data)
             .map_err(|_| FrameError::Encryption)?;
 
         trace!("encrypted to {} bytes", data.len());
+        
+        let mut varint_nonce = [0u8; 9];
+        let varint_nonce_len = nonce_num.encode_var(&mut varint_nonce);
+        let varint_nonce = &varint_nonce[9 - varint_nonce_len..];
 
-        dst.put_u32(u32::try_from(data.len() + NONCE_LEN)?);
-        dst.extend_from_slice(&nonce_bytes);
+        let packet_len = u32::try_from(data.len() + varint_nonce_len)?;
+
+        assert_eq!(packet_len as usize, data.len() + varint_nonce.len());
+
+        dst.put_u32(packet_len);
+        dst.extend_from_slice(varint_nonce);
         dst.extend_from_slice(data);
 
-        trace!("sent frame of size: {}", HEADER_LEN + NONCE_LEN + data.len());
+        trace!("sent frame of size: {}", HEADER_LEN + varint_nonce_len + data.len());
 
         Ok(())
     }
@@ -54,7 +65,7 @@ impl<M> EncryptionCodec<M> {
             u32::from_be_bytes(b) as usize
         };
 
-        if length <= NONCE_LEN {
+        if length <= HEADER_LEN + 1 {
             return Err(FrameError::PossiblyMaliciousFrame);
         }
 
@@ -71,10 +82,21 @@ impl<M> EncryptionCodec<M> {
 
         data.advance(HEADER_LEN);
 
-        let frame = data.split_to(length);
+        let mut frame = data.split_to(length);
 
-        let nonce = NonceType::from_slice(&frame[..NONCE_LEN]);
-        let mut packet = frame[NONCE_LEN..].to_vec();
+        trace!("left: {} bytes", frame.len());
+
+        let (nonce_num, nonce_num_len) = u64::decode_var(&frame)
+            .ok_or(FrameError::InvalidNonce)?;
+        
+        frame.advance(nonce_num_len);
+
+        let mut nonce_bytes = [0u8; NONCE_LEN];
+        let nonce_bytes_raw = nonce_num.to_be_bytes();
+        nonce_bytes[(NONCE_LEN - size_of_val(&nonce_bytes_raw))..].copy_from_slice(&nonce_bytes_raw);
+
+        let nonce = NonceType::from_slice(&nonce_bytes);
+        let mut packet = frame.to_vec();
 
         trace!("decrypting {} bytes", packet.len());
 

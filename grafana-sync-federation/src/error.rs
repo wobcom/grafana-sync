@@ -61,4 +61,6 @@ pub enum FrameError {
     PossiblyMaliciousFrame,
     #[error("The requested frame size exceeded the maximum size")]
     FrameTooBig,
+    #[error("Nonce in frame was invalid")]
+    InvalidNonce,
 }
