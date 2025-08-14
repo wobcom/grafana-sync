@@ -1,8 +1,6 @@
 {
   rustPlatform,
   perl,
-  pkg-config,
-  openssl,
 }: let
   cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
 in
@@ -12,10 +10,8 @@ rustPlatform.buildRustPackage {
 
   src = ./.;
 
-  buildInputs = [
+  nativeBuildInputs = [
     perl
-    pkg-config
-    openssl
   ];
 
   cargoDeps = rustPlatform.importCargoLock {

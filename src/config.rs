@@ -1,7 +1,7 @@
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 use log::{debug, info, warn};
-use serde_yaml::Value;
+use serde_json::Value;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -78,7 +78,7 @@ impl Config {
         };
 
         let json_instances = json_instances
-            .as_sequence()
+            .as_array()
             .ok_or(GSError::ConfigKeyTypeWrong(
                 "instances".to_string(),
                 "Sequence",
@@ -116,7 +116,7 @@ impl Config {
     pub fn use_config_file<P: AsRef<Path>>(path: P) -> Result<Config, GSError> {
         let file = Self::get_or_create(&path)?;
 
-        let config = serde_yaml::from_reader::<_, Value>(file)?;
+        let config = serde_json::from_reader::<_, Value>(file)?;
 
         let sync_tag = Self::read_string_from_config(&config, "sync_tag")?;
         let sync_rate_mins = Self::read_u64_from_config(&config, "sync_rate_mins")?;
