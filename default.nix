@@ -16,24 +16,17 @@ in
     services.grafana-sync = {
       enable = mkEnableOption "Grafana Sync";
       configFile = mkOption {
-        description = ''
-          YAML formatted config file in the following format:
-          ```yaml
-          sync_tag: "SyncMe"
-          instances:
-            - url: "https://example.com"
-              api_token: "3qv5ukv8u95usiojfoj0wevrjmw0bt8w0"
-            - url: "https://example2.com"
-              api_token: "3qv5ukv8u95usiojfoj0wevrjmw0bt8w0"
-          sync_rate_mins: 1
-          ```
-        '';
+        description = "Path to a YAML formatted config file.";
         type = types.path;
       };
     };
   };
-  config = {
-    users.users."grafana-sync".isNormalUser = true;
+  config = lib.mkIf cfg.enable {
+    users.users."grafana-sync" = {
+      isSystemUser = true;
+      group = "grafana-sync";
+    };
+    useres.groups."grafana-sync" = {};
 
     systemd.services.grafana-sync = {
       after = [ "network.target" ];

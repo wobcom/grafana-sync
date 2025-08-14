@@ -3,11 +3,12 @@
   perl,
   pkg-config,
   openssl,
-}:
-
+}: let
+  cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+in
 rustPlatform.buildRustPackage {
   pname = "grafana-sync";
-  version = "0.1.0";
+  version = cargoToml.package.version;
 
   src = ./.;
 
@@ -17,13 +18,10 @@ rustPlatform.buildRustPackage {
     openssl
   ];
 
-  useFetchCargoVendor = true;
-  cargoHash = "sha256-DJPQmcP6i+6JoPA9vOSICTq6yXpYWVG9WPI58fVJVoc=";
+  cargoDeps = rustPlatform.importCargoLock {
+    lockFile = ./Cargo.lock;
+    allowBuiltinFetchGit = true;
+  };
 
-  #installPhase = ''
-  #  runHook preInstall
-  #  mkdir -p $out/bin
-  #  mv target/release/grafana-sync $out/bin
-  #  runHook postInstall
-  #'';
+  doCheck = true;
 }
