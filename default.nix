@@ -26,7 +26,7 @@ in
       isSystemUser = true;
       group = "grafana-sync";
     };
-    useres.groups."grafana-sync" = {};
+    users.groups."grafana-sync" = {};
 
     systemd.services.grafana-sync = {
       after = [ "network.target" ];
