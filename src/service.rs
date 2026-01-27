@@ -4,27 +4,26 @@ use crate::dashboard_state::DashboardState;
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 use chrono::Local;
-use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use log::{debug, error, info};
-use tokio::time::Instant;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 use tracing::instrument;
 
 // base_url -> (folder title -> Folder)
 pub type FolderMap = HashMap<String, HashMap<String, Folder>>;
 
-/// Periodically synchronises all tagged dashboards across *all* instances.
+/// Periodically synchronizes all tagged dashboards across *all* instances.
 #[derive(Debug, Clone)]
 pub struct SyncService {
     cfg: Arc<Config>,
 }
 
 impl SyncService {
-
     /* Constructors */
 
     #[instrument(skip_all)]
@@ -42,7 +41,7 @@ impl SyncService {
 
         loop {
             tick.tick().await;
-            
+
             info!("=== sync-cycle #{cycle} ({}) ===", Local::now());
 
             let start = Instant::now();
@@ -62,8 +61,14 @@ impl SyncService {
 
         state.print_data_stats();
 
-        let folder_map = self.
-            mirror_folders(state.unique_folders().iter().map(|&c| c.to_owned()).collect())
+        let folder_map = self
+            .mirror_folders(
+                state
+                    .unique_folders()
+                    .iter()
+                    .map(|&c| c.to_owned())
+                    .collect(),
+            )
             .await;
 
         let dashboards = Arc::new(
@@ -79,10 +84,7 @@ impl SyncService {
         self.purge_empty_folders().await
     }
 
-    async fn collect_dashboards(
-        &self,
-        state: &mut DashboardState,
-    ) -> Result<(), GSError> {
+    async fn collect_dashboards(&self, state: &mut DashboardState) -> Result<(), GSError> {
         let mut tasks = FuturesUnordered::new();
 
         for instance in &self.cfg.instances {
@@ -149,7 +151,7 @@ impl SyncService {
 
 async fn fetch_full_dashboards(
     instance: GrafanaInstance,
-    tag: &str
+    tag: &str,
 ) -> Result<(String, Vec<FullDashboard>), GSError> {
     let mut dashboards = Vec::new();
     for d in instance.get_dashboards_by_tag(tag).await? {
@@ -171,7 +173,10 @@ async fn ensure_folders_on_instance(
             Ok(folder) => {
                 map.insert(folder.title.clone(), folder);
             }
-            Err(e) => error!("{}: could not create folder '{name}': {e}", instance.base_url()),
+            Err(e) => error!(
+                "{}: could not create folder '{name}': {e}",
+                instance.base_url()
+            ),
         }
     }
     (instance.base_url().to_owned(), map)
@@ -199,9 +204,7 @@ async fn replicate_dashboards_on_instance(
             let maybe_dashboard = guard.read().await;
             match &*maybe_dashboard {
                 Some(d) => {
-                    let title = d.meta.folder_title
-                        .as_deref()
-                        .unwrap_or("");
+                    let title = d.meta.folder_title.as_deref().unwrap_or("");
                     let folder = folders.get(title);
                     inst.import_dashboard(d, folder, true).await?;
                 }
@@ -216,7 +219,8 @@ async fn replicate_dashboards_on_instance(
     }
 
     while let Some(res) = jobs.next().await {
-        res?; // bubble up any API error
+        res?;
     }
+    
     Ok(())
 }

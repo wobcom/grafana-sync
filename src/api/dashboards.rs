@@ -128,6 +128,16 @@ pub struct DashboardImportBody {
     // pub plugin_id: String,
 }
 
+impl PartialEq for FullDashboard {
+    fn eq(&self, other: &Self) -> bool {
+        self.dashboard.uid == other.dashboard.uid
+            && self.dashboard.title == other.dashboard.title
+            && self.dashboard.tags == other.dashboard.tags
+            && self.dashboard.panels == other.dashboard.panels
+            && self.dashboard.graph_tooltip == other.dashboard.graph_tooltip
+    }
+}
+
 #[allow(dead_code)]
 impl GrafanaInstance {
     pub async fn get_tags(&self) -> Result<Vec<Tag>, GSError> {
@@ -233,8 +243,7 @@ impl GrafanaInstance {
     ) -> Result<(), GSError> {
         let base_url = self.base_url().to_string();
         let endpoint = format!("{}/api/dashboards/import", base_url);
-        let folder_uid = folder
-            .map(|f| f.uid.clone());
+        let folder_uid = folder.map(|f| f.uid.clone());
 
         info!(
             "Starting replication of dashboard \"{}\" onto {}",
@@ -280,9 +289,7 @@ impl GrafanaInstance {
         for dashboard in dashboards {
             info!(
                 "Prefetching full dashboard: {}/{}",
-                dashboard.folder_title
-                    .as_deref()
-                    .unwrap_or(""), 
+                dashboard.folder_title.as_deref().unwrap_or(""),
                 dashboard.title
             );
             let full_dashboard = self.get_dashboard_full(&dashboard.uid).await?;

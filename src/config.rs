@@ -16,7 +16,7 @@ pub struct Config {
 }
 
 impl Config {
-    fn get_or_create<P: AsRef<Path>>(path: P) -> io::Result<File> {
+    fn load_or_create<P: AsRef<Path>>(path: P) -> io::Result<File> {
         if !fs::exists(&path)? {
             info!(
                 "No config file exists yet. Creating one at {}",
@@ -114,7 +114,7 @@ impl Config {
     }
 
     pub fn use_config_file<P: AsRef<Path>>(path: P) -> Result<Config, GSError> {
-        let file = Self::get_or_create(&path)?;
+        let file = Self::load_or_create(&path)?;
 
         let config = serde_json::from_reader::<_, Value>(file)?;
 
