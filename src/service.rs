@@ -35,7 +35,8 @@ impl SyncService {
     /// Runs forever, every sync_cycle_interval
     #[instrument(skip_all)]
     pub async fn run(&self) -> Result<(), GSError> {
-        let mut tick = tokio::time::interval(Duration::from_secs(self.cfg.sync_rate_mins * 60));
+        let mut tick =
+            tokio::time::interval(Duration::from_secs(self.cfg.sync_rate_mins as u64 * 60));
         let mut cycle = 0usize;
 
         loop {

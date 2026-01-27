@@ -134,6 +134,7 @@ impl PartialEq for FullDashboard {
             && self.dashboard.tags == other.dashboard.tags
             && self.dashboard.panels == other.dashboard.panels
             && self.dashboard.graph_tooltip == other.dashboard.graph_tooltip
+            && self.meta.folder_title == other.meta.folder_title
     }
 }
 

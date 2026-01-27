@@ -31,7 +31,7 @@ impl DashboardState {
     pub fn diff(
         &self,
         destructive: bool,
-        sync_interval_mins: u64,
+        sync_interval_mins: u32,
     ) -> Vec<(&str, Option<FullDashboard>)> {
         let by_uid = index_by_uid(&self.sets);
 
@@ -80,7 +80,7 @@ fn merge_dashboards<'a>(
     uid: &'a str,
     dashboards: &[&FullDashboard],
     destructive: bool,
-    sync_interval_mins: u64,
+    sync_interval_mins: u32,
     instance_count: usize,
 ) -> Option<(&'a str, Option<FullDashboard>)> {
     debug!("{uid}: {:?}", dashboards.iter().map(|d| &d.dashboard.title));
@@ -96,8 +96,8 @@ fn merge_dashboards<'a>(
 
     // Delete if matching criteria to determine it was deleted
     let now: DateTime<Local> = Local::now();
-    let age_mins: u64 = (now - newest.meta.updated).num_minutes() as u64;
-    let delete_outdated = destructive && age_mins > sync_interval_mins * 2;
+    let age_mins = (now - newest.meta.updated).num_minutes();
+    let delete_outdated = destructive && age_mins > sync_interval_mins as i64 * 2;
 
     let result = if delete_outdated {
         warn!("Dashboard {} will be deleted", newest.dashboard.title);

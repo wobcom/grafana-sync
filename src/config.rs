@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 pub struct Config {
     pub instances: Vec<GrafanaInstance>,
     pub sync_tag: String,
-    pub sync_rate_mins: u64,
+    pub sync_rate_mins: u32,
 }
 
 impl Config {
@@ -55,12 +55,13 @@ impl Config {
     }
 
     #[instrument]
-    fn read_u64_from_config(config: &Value, key: &str) -> Result<u64, GSError> {
+    fn read_u32_from_config(config: &Value, key: &str) -> Result<u32, GSError> {
         let value = Self::get_yaml_path(config, key)?;
 
         value
             .as_u64()
-            .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.to_string(), "u64"))
+            .and_then(|n| n.try_into().ok())
+            .ok_or_else(|| GSError::ConfigKeyTypeWrong(key.to_string(), "u32"))
     }
 
     #[instrument]
@@ -119,7 +120,7 @@ impl Config {
         let config = serde_json::from_reader::<_, Value>(file)?;
 
         let sync_tag = Self::read_string_from_config(&config, "sync_tag")?;
-        let sync_rate_mins = Self::read_u64_from_config(&config, "sync_rate_mins")?;
+        let sync_rate_mins = Self::read_u32_from_config(&config, "sync_rate_mins")?;
 
         let instances = Self::collect_instances(&config)?;
 
