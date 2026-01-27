@@ -1,10 +1,9 @@
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
 use chrono::{DateTime, Local};
-use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::instrument;
+use tracing::{debug, info, instrument, warn};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Tag {

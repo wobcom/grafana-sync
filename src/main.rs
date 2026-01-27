@@ -1,9 +1,11 @@
 use crate::config::Config;
 use crate::error::GSError;
 use crate::service::SyncService;
-use log::{error, info, LevelFilter};
 use std::env;
 use tracing::instrument;
+use tracing::{error, info};
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::EnvFilter;
 
 pub mod api;
 mod config;
@@ -23,10 +25,13 @@ async fn main() {
 
 #[instrument]
 async fn run() -> Result<(), GSError> {
-    env_logger::builder()
-        .filter_level(LevelFilter::Info)
-        .format_target(false)
-        .parse_default_env()
+    tracing_subscriber::fmt::fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .with_target(false)
         .init();
 
     let args: Vec<String> = env::args().collect();

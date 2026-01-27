@@ -6,13 +6,12 @@ use crate::instance::GrafanaInstance;
 use chrono::Local;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use log::{debug, error, info};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
-use tracing::instrument;
+use tracing::{debug, error, info, instrument};
 
 // base_url -> (folder title -> Folder)
 pub type FolderMap = HashMap<String, HashMap<String, Folder>>;
@@ -221,6 +220,6 @@ async fn replicate_dashboards_on_instance(
     while let Some(res) = jobs.next().await {
         res?;
     }
-    
+
     Ok(())
 }

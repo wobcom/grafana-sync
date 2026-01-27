@@ -1,7 +1,7 @@
 use crate::api::dashboards::FullDashboard;
 use chrono::{DateTime, Local};
-use log::{debug, info, warn};
 use std::collections::{HashMap, HashSet};
+use tracing::{debug, info, warn};
 
 type Dashboards<'a> = HashMap<&'a str, Vec<&'a FullDashboard>>;
 type SetName = String;
@@ -83,12 +83,7 @@ fn merge_dashboards<'a>(
     sync_interval_mins: u64,
     instance_count: usize,
 ) -> Option<(&'a str, Option<FullDashboard>)> {
-    debug!(
-        "{uid}: {:?}",
-        dashboards
-            .iter()
-            .map(|d| &d.dashboard.title)
-    );
+    debug!("{uid}: {:?}", dashboards.iter().map(|d| &d.dashboard.title));
     let first = dashboards.first()?;
 
     // Fast track: If all dashboards are synced already

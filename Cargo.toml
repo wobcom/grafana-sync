@@ -11,11 +11,10 @@ repository = "https://github.com/wobcom/grafana-sync"
 serde_json = "1.0"
 tokio = { version = "1.47", features = ["rt", "rt-multi-thread", "macros"] }
 chrono = { version = "0.4", features = ["serde"] }
-log = "0.4"
-env_logger = "0.11"
 thiserror = "2.0"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "query"] }
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 aes-gcm = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.18", features = ["v4", "fast-rng"] }

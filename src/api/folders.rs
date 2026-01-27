@@ -1,8 +1,8 @@
 use crate::api::dashboards::Folder;
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
-use log::{debug, info};
 use serde::Serialize;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]

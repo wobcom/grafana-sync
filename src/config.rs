@@ -1,12 +1,12 @@
 use crate::error::GSError;
 use crate::instance::GrafanaInstance;
-use log::{debug, info, warn};
 use serde_json::Value;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::{fs, io};
 use tracing::instrument;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct Config {
