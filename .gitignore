@@ -1,2 +1,6 @@
 /target
-/config.yaml
+/config*.yaml
+/result
+/key
+/key.pub
+/.idea
